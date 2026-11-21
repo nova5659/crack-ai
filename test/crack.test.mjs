@@ -304,7 +304,8 @@ test('parseStateTag parses live nation governance stats AND inline suggested cho
     viewMode: 'novel',
   });
   assert.ok(novelPrompt.includes('별표(*)'));
-  assert.ok(novelPrompt.includes('장면 연속성 최우선'));
+  assert.ok(novelPrompt.includes('진지한 서사 몰입'));
+  assert.ok(novelPrompt.includes('연재 스토리 아크'));
   assert.ok(novelPrompt.includes('choices'));
 });
 

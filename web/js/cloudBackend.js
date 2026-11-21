@@ -286,18 +286,18 @@ function buildSystemInstruction({ character, session, persona, triggeredLorebook
   if (character.isAnime) {
     const routeGuide =
       session.storyRoute === 'canon'
-        ? '원작 고증 모드(CANON): 원작 설정·파워 밸런스·말투·타임라인을 최대한 충실히 고증하세요.'
-        : 'IF 자유 전개 모드(WHAT-IF): 원작의 캐릭터성과 규칙은 유지하되 {{user}}의 활약에 따라 원작 비극을 막거나 새로운 평행세계 전개로 자유롭게 분기하세요.';
+        ? '원작 고증 모드(CANON): 원작 애니메이션의 세계관 법칙·파워 밸런스·말투·비극성과 서사의 무게감을 실제 본편처럼 진지하게 고증하세요.'
+        : 'IF 자유 전개 모드(WHAT-IF): 원작의 캐릭터성·규칙·생사의 무게감은 100% 진지하게 유지하되 {{user}}의 치열한 선택과 대가에 따라 정통 평행세계 서사로 깊이 있게 분기하세요.';
     parts.push(
-      `\n[애니메이션 원작 설정]\n- 작품: ${character.animeTitle || character.name}${character.powerSystem ? `\n- 고유 시스템: ${character.powerSystem}` : ''}${character.castMembers?.length ? `\n- 주요 등장인물: ${character.castMembers.join(', ')}` : ''}\n- 진행 스타일: ${character.playStyle === 'world' ? '멀티 캐릭터 세계관 RPG 시뮬레이션 (화자 구분 및 상태창 업데이트)' : '1:1 캐릭터 몰입 스토리'}\n- 전개 노선: ${renderTemplate(routeGuide, ctx)}`
+      `\n[애니메이션 원작 설정]\n- 작품: ${character.animeTitle || character.name}${character.powerSystem ? `\n- 고유 시스템: ${character.powerSystem}` : ''}${character.castMembers?.length ? `\n- 주요 등장인물: ${character.castMembers.join(', ')}` : ''}\n- 진행 스타일: ${character.playStyle === 'world' ? '멀티 캐릭터 세계관 RPG 시뮬레이션 (각 인물이 살아 움직이며 화자 구분 및 상태창 업데이트)' : '1:1 캐릭터 몰입 대서사'}\n- 전개 노선: ${renderTemplate(routeGuide, ctx)}`
     );
   }
 
   if (character.isNationSim) {
-    const modeDesc =
-      session.nationMode === 'surreal'
-        ? '🌀 초현실·막장 변수 모드 활성화: 정통 국가 경영의 틀은 유지하되, 매 1~2턴마다 예측 불가능하고 웃기거나 황당한 초현실 돌발 사건을 적극 발생시키세요!'
-        : '🏛️ 정통 리얼리티 모드 활성화: 실제 역사·정치·경제·군사 인과관계를 냉정하고 치밀하게 반영하세요.';
+    const isCrisis = session.nationMode === 'crisis' || session.nationMode === 'surreal';
+    const modeDesc = isCrisis
+      ? '⚔️ 전시·격변 하드코어 모드 활성화: 실제 지정학·경제·군사 원리에 기반한 초대형 복합 위기(금융 경색, 국경 무력 도발, 동맹 균열, 내각 갈등, 공급망 봉쇄)가 연쇄적으로 밀려오는 초고난도 정통 정치·전쟁 스릴러로 진행하세요. 절대 개그·밈·초현실 장난 금지!'
+      : '🏛️ 정통 국정 시뮬레이션 모드 활성화: 실제 역사·정치·거시경제·외교·군사 인과관계를 냉정하고 치밀하게 반영해 묵직한 정통 국가 경영 대서사를 진행하세요. 절대 개그·밈·초현실 장난 금지!';
     const ns = session.nationState;
     parts.push(
       `\n[국가의 시대 · 실시간 통치 시스템]\n- 진행 모드: ${modeDesc}${ns ? `\n- 직전 국가 상태: 국가=${ns.name}, 시점=${ns.date}, 국력=${ns.power}/100, 재정=${ns.treasury}, 지지율=${ns.approval}%, 군사=${ns.military}/100, 안정도=${ns.stability}/100` : ''}`
@@ -315,20 +315,26 @@ function buildSystemInstruction({ character, session, persona, triggeredLorebook
   parts.push(`\n[현재 감정 상태]\n- 호감도: ${session.affinity ?? 35}/100 · 감정: ${session.mood || '호기심'} · 관계: ${session.relationshipStage || '첫 만남'}`);
   const userRefGuide =
     ctx.userName === '나'
-      ? '유저 호칭/시점 주의: 유저의 기본 이름이 "나"로 되어 있더라도 절대 AI가 1인칭("내 목소리", "내 귓가", "나를 향해")으로 유저의 시점을 가로채 서술하지 마세요! 캐릭터의 시점(또는 자연스러운 3인칭 관찰자 시점)에서 대사 속 2인칭("너", "당신" 등)과 자연스러운 지문 시선으로 매끄럽게 서술하세요.'
-      : `유저 호칭/시점: 지문에서는 "${ctx.userName}"을(를) 자연스러운 3인칭으로 호칭하고, 대사에서는 캐릭터 성격에 맞는 호칭으로 부르세요. 절대 "${ctx.userName}"의 대사·행동·속마음을 대신 결정해 쓰지 마세요.`;
+      ? '유저 주권 및 시점 절대 규칙: 유저의 기본 이름이 "나"로 되어 있더라도 AI가 절대 1인칭("내 목소리", "내 귓가", "나를 바라보는 가운데")으로 시점을 가로채지 마세요! 또한 절대 유저의 대사·연설·명령·행동을 AI가 대신 지어내 쓰지 마세요. 철저히 3인칭 관찰자/캐릭터 시점에서 유저의 실제 입력에 대한 세계와 인물의 반응만 서술하세요.'
+      : `유저 주권 및 시점 절대 규칙: 지문에서는 "${ctx.userName}"을(를) 자연스러운 3인칭으로 호칭하고, 대사에서는 캐릭터 성격에 맞는 호칭으로 부르세요. 절대 "${ctx.userName}"의 대사·연설·행동·결정을 AI가 대신 지어내 쓰지 마세요.`;
 
-  parts.push(`\n[서술 및 연속성 절대 규칙]
-1. ${styleMap[viewMode] || styleMap.novel}
-2. ${lenMap[outputLength] || lenMap.medium}
-3. [장면 연속성 최우선] 직전 턴의 마지막 위치·거리·자세·소품·표정·대사를 첫 문장에서 물리적으로 자연스럽게 이어받으세요. 인물이 갑자기 다른 자세로 순간이동하거나 상황이 초기화되면 안 됩니다.
-4. ${userRefGuide}
-5. [AI 번역투·클리셰 금지] "~한 것일까", "고스란히 담겨 있었다", "묘한 ~이 스쳤다", "기묘한 침묵이 흘렀다", "어때, 감이 좀 와?", "이제 진짜 시작이야!" 같은 상투적 AI 표현을 절대 쓰지 마세요.
-6. ${isContinue ? '방금 끊긴 문장과 장면의 숨결을 그대로 이어받아 다음 사건과 대사로 매끄럽게 전개하세요.' : '상대방의 직전 대사·행동에 즉각적이고 입체적으로 반응하며, 마지막 문장은 다음 전개를 자연스럽게 열어두는 여운·긴장감 있는 훅으로 마무리하세요.'}
-7. 맨 마지막 줄에만(줄바꿈 1회 후) 숨김 상태 태그 1줄을 덧붙이세요. choices 배열에는 방금 끝난 장면 직후 유저가 선택할 만한 서로 다른 분위기의 행동/대사 3개(각 15~52자, 내부 대사는 작은따옴표 '...'만 사용)를 반드시 포함하세요:
+  parts.push(`\n[전 작품 공통 최상위 서사 헌장 · 절대 엄수]
+1. [진지한 서사 몰입 & 개연성 절대 수호]
+   - 이 작품의 세계관·인물·갈등·생사와 운명을 실제 대작 드라마·베스트셀러 연재 웹소설·극장판 본편 수준의 진지함으로 집필합니다.
+   - 황당한 병맛 전개, 억지 개그, 인터넷 밈(SNS 밈, 배달앱, 음식/동물/외계인 드립, 유치한 패러디), 메타 발언을 절대 금지합니다.
+   - 사용자가 가볍거나 도발적인 입력을 하더라도 장난에 동조해 망가지지 말고, 세계관 내부의 현실적이고 묵직한 반응(당혹, 냉정한 제지, 신뢰 하락, 현실적 파장)으로 작품의 품격을 지키세요.
+2. [진심으로 이어지는 연재 스토리 아크 & 인과관계]
+   - 매 턴은 긴 서사가 이어지는 다음 화(Episode)입니다. 이전 턴의 사건·약속·상처·비밀·세력 구도·위치와 자세·시간의 흐름을 단 하나도 놓치지 말고 치밀하게 이어받으세요.
+   - 단순히 맞장구만 치지 말고, 주변 인물·적대 세력·정세도 각자의 목적대로 움직이며 매 턴 이야기가 실제로 한 걸음 전진하고 실질적인 대가와 연쇄 결과(Consequences)가 따르게 하세요.
+3. ${styleMap[viewMode] || styleMap.novel}
+4. ${lenMap[outputLength] || lenMap.medium}
+5. ${userRefGuide}
+6. [AI 번역투·클리셰 금지] "~한 것일까", "고스란히 담겨 있었다", "묘한 ~이 스쳤다", "기묘한 침묵이 흘렀다", "어때, 감이 좀 와?", "이제 진짜 시작이야!" 같은 상투적 AI 표현을 절대 쓰지 마세요.
+7. ${isContinue ? '방금 끊긴 문장과 장면의 숨결을 그대로 이어받아 다음 사건과 대사로 매끄럽게 전개하세요.' : '상대방의 직전 대사·행동에 즉각적이고 묵직하게 반응하며, 마지막 문장은 다음 화의 선택으로 자연스럽게 이어지는 긴장감 있는 장면으로 열어두세요.'}
+8. 맨 마지막 줄에만(줄바꿈 1회 후) 숨김 상태 태그 1줄을 덧붙이세요. 본문 안에 JSON·**[다음 선택지]** 번호 목록을 중복으로 쓰지 말고, choices 배열에만 방금 끝난 장면의 갈등을 진지하게 이어받아 다음 화 핵심 분기가 될 서로 다른 선택지 3개(각 15~52자, 내부 대사는 작은따옴표 '...'만 사용, 장난·드립 금지)를 반드시 포함하세요:
 ${character.isNationSim
-  ? '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재정국2~12자","nation":{"name":"국가명","date":"YYYY년 M월 (N턴)","power":0~100정수,"treasury":"재정요약","approval":0~100정수,"military":0~100정수,"stability":0~100정수},"choices":["적극 정책/행동 1문장","외교·정치 승부수 1문장","신중·정보 파악 1문장"]}-->'
-  : '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재감정2~12자","choices":["적극적 행동·대사 1문장","감정·도발 대사 1문장","신중·탐색 행동 1문장"]}-->'}`);
+  ? '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재정국2~12자","nation":{"name":"국가명","date":"YYYY년 M월 (N턴)","power":0~100정수,"treasury":"재정요약","approval":0~100정수,"military":0~100정수,"stability":0~100정수},"choices":["결단력 있는 정책·지시 1문장","외교·정치적 승부수 1문장","신중한 정보·실무 파악 1문장"]}-->'
+  : '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재감정2~12자","choices":["정면 돌파 행동·대사 1문장","진지한 심리·감정 대사 1문장","신중한 탐색·전략 행동 1문장"]}-->'}`);
 
   return parts.join('\n');
 }
@@ -1365,8 +1371,8 @@ export const cloudBackend = {
     const transcript = session.messages.slice(-8).map((m) => `${m.role === 'user' ? persona.name : character.name}: ${m.content}`).join('\n\n');
     const out = await callGeminiGenerate({
       model: 'gemini-3.5-flash-lite',
-      systemInstruction: '당신은 한국 웹소설 인터랙티브 채팅(CRACK) 추천 선택지 작가입니다. JSON 문자열 배열(["...", "...", "..."])만 반환하세요.',
-      prompt: `캐릭터 "${character.name}"와 유저 "${persona.name}"의 최근 대화:\n\n${transcript}\n\n서로 다른 분위기의 추천 답변 3개를 *행동 지문*과 "대사"를 섞어 작성해 JSON 배열로 반환하세요.`,
+      systemInstruction: '당신은 한국 정통 웹소설 인터랙티브 스토리(CRACK)의 추천 선택지 작가입니다. 진지하고 몰입감 있는 선택지 JSON 문자열 배열(["...", "...", "..."])만 반환하세요.',
+      prompt: `작품 "${character.name}"(${character.genreLabel})의 최근 전개:\n\n${transcript}\n\n방금 끝난 장면의 진지한 분위기와 인과관계를 그대로 이어받아, 주인공(${persona.name})이 다음 화에서 선택할 만한 묵직하고 설득력 있는 선택지 3개(1: 정면 돌파·결단 / 2: 심리·외교·감정 압박 / 3: 신중·정보 탐색)를 작성하세요. 장난·개그·밈 드립은 절대 금지합니다. 자연스러운 한국어 1문장(15~55자) JSON 배열만 반환하세요.`,
       maxOutputTokens: 500,
       jsonMode: true,
     });

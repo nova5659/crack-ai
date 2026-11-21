@@ -317,7 +317,7 @@ function bindStaticEvents() {
     });
   });
 
-  // Nation Mode (《국가의 시대》 정통 리얼리티 vs 초현실 변수)
+  // Nation Mode (《국가의 시대》 정통 국정 vs 전시·격변 하드코어)
   $$('#nationModeToggle .seg-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (!state.activeSession) return;
@@ -326,7 +326,8 @@ function bindStaticEvents() {
       try {
         const { session } = await api.updateSession(state.activeSession.id, { nationMode: nmode });
         state.activeSession = session;
-        showToast(nmode === 'surreal' ? '🌀 초현실·막장 변수 모드가 활성화되었습니다!' : '🏛️ 정통 리얼리티 모드로 전환되었습니다.');
+        renderMessages();
+        showToast(nmode === 'crisis' ? '⚔️ 전시·격변 하드코어 모드가 활성화되었습니다.' : '🏛️ 정통 국정 시뮬레이션 모드로 전환되었습니다.');
       } catch (err) {
         showToast(err.message, 'error');
       }
@@ -1825,7 +1826,7 @@ function syncInspectorFields() {
   const isNation = Boolean(state.activeCharacter?.isNationSim);
   $('#nationModeBlock').hidden = !isNation;
   if (isNation) {
-    const activeNmode = s.nationMode === 'surreal' ? 'surreal' : 'realistic';
+    const activeNmode = s.nationMode === 'crisis' || s.nationMode === 'surreal' ? 'crisis' : 'realistic';
     $$('#nationModeToggle .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.nmode === activeNmode));
   }
 
@@ -1919,7 +1920,7 @@ function renderMessages() {
 
   // Immersive Scene Intro Spotlight Banner at the top of the story
   const modePill = c.isNationSim
-    ? `<span class="scene-pill gold">${s.nationMode === 'surreal' ? '🌀 초현실 변수' : '🏛️ 정통 리얼리티'}</span>`
+    ? `<span class="scene-pill gold">${s.nationMode === 'crisis' || s.nationMode === 'surreal' ? '⚔️ 전시·격변 하드코어' : '🏛️ 정통 국정 시뮬'}</span>`
     : c.isAnime
       ? `<span class="scene-pill anime">🎬 ${escapeHtml(c.animeTitle || 'ANIME')} · ${s.storyRoute === 'canon' ? '원작 고증' : 'IF 전개'}</span>`
       : `<span class="scene-pill">${escapeHtml(c.genreLabel || '스토리')}</span>`;

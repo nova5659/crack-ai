@@ -400,7 +400,7 @@ async function handleGenerateSuggestions(res, sessionId) {
     .map((m) => `${m.role === 'user' ? persona.name : character.name}: ${m.content}`)
     .join('\n\n');
 
-  const prompt = `다음은 캐릭터 "${character.name}"(${character.genreLabel})와 유저 "${persona.name}"의 최근 대화입니다.\n\n${recentTranscript}\n\n유저(${persona.name})가 바로 이어서 보낼 법한 매력적이고 서로 다른 분위기의 추천 답변 3개를 작성하세요.\n- 1번: 적극적/감정 몰입형\n- 2번: 도발적/긴장감 유도형\n- 3번: 신중/질문·탐색형\n각 답변은 *짧은 행동 지문*과 "대사"를 자연스럽게 섞어 1~2문장으로 작성하고, 반드시 JSON 배열(["...", "...", "..."])만 출력하세요.`;
+  const prompt = `다음은 작품 "${character.name}"(${character.genreLabel})의 최근 전개입니다.\n\n${recentTranscript}\n\n방금 끝난 장면의 진지한 분위기와 인과관계를 그대로 이어받아, 주인공(${persona.name})이 다음 화에서 선택할 만한 묵직하고 설득력 있는 추천 선택지 3개를 작성하세요.\n- 1번: 정면 돌파·결단형\n- 2번: 심리·감정·외교 압박형\n- 3번: 신중·정보 탐색·전략 우회형\n장난·개그·밈·황당한 드립은 절대 금지합니다. 각 선택지는 자연스러운 한국어 1문장(15~55자)으로 작성하고, 반드시 JSON 배열(["...", "...", "..."])만 출력하세요.`;
 
   try {
     const out = await generateStructuredText({
