@@ -8,7 +8,14 @@ import path from 'node:path';
 const tmpDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crack-ai-test-'));
 process.env.CRACK_DATA_DIR = tmpDataDir;
 
-const { buildGeminiContents, buildSystemInstruction, findTriggeredLorebooks } = await import('../src/promptBuilder.mjs');
+const {
+  buildGeminiContents,
+  buildSystemInstruction,
+  computeStoryArc,
+  findTriggeredLorebooks,
+  resolveSessionEnding,
+  rollFateJudgment,
+} = await import('../src/promptBuilder.mjs');
 const {
   buildFallbackChain,
   buildGenerationPayload,
@@ -306,7 +313,59 @@ test('parseStateTag parses live nation governance stats AND inline suggested cho
   assert.ok(novelPrompt.includes('별표(*)'));
   assert.ok(novelPrompt.includes('진지한 서사 몰입'));
   assert.ok(novelPrompt.includes('연재 스토리 아크'));
+  assert.ok(novelPrompt.includes('실제 실패 허용 규칙'));
   assert.ok(novelPrompt.includes('choices'));
+});
+
+test('Story Arc, Fate Judgment (real failure rolls), and Multi-Ending engine work reliably', () => {
+  // 1. Story Arc tracks Acts 1-4 and Final Turn accurately
+  const arc1 = computeStoryArc({ storyLength: 'standard', targetTurns: 14, messages: [{ role: 'model' }, { role: 'user' }] });
+  assert.equal(arc1.actIndex, 1);
+  assert.equal(arc1.isFinalTurn, false);
+  const arcFinal = computeStoryArc({
+    storyLength: 'short',
+    targetTurns: 8,
+    messages: Array.from({ length: 8 }, () => ({ role: 'user', content: '행동' })),
+  });
+  assert.equal(arcFinal.actIndex, 4);
+  assert.equal(arcFinal.isFinalTurn, true);
+
+  // 2. Deterministic low fate roll produces explicit Failure directive (no plot armor!)
+  const failRoll = rollFateJudgment({
+    session: { difficulty: 'real', affinity: 40, messages: [{ role: 'user' }, { role: 'user' }] },
+    character: { name: '서도현' },
+    rng: () => 0.05,
+  });
+  assert.equal(failRoll.outcome, 'fail');
+  assert.ok(failRoll.directive.includes('명백한 실패'));
+
+  // 3. Parse outcome + ending object from CRACK_STATE tag
+  const parsedEnd = parseStateTag(
+    '에필로그 본문\n<!--CRACK_STATE:{"affinityDelta":-6,"mood":"탄핵 실각","outcome":"fail","ending":{"type":"bad","code":"BAD ENDING · 탄핵","title":"무너진 집무실","summary":"민심 이반으로 결국 정권이 붕괴했다."},"choices":[]}-->'
+  );
+  assert.equal(parsedEnd.cleanText, '에필로그 본문');
+  assert.equal(parsedEnd.stateUpdate.outcome, 'fail');
+  assert.equal(parsedEnd.stateUpdate.ending.type, 'bad');
+  assert.equal(parsedEnd.stateUpdate.ending.title, '무너진 집무실');
+
+  // 4. Fatal collapse auto-triggers Bad Ending even if LLM omits ending JSON
+  const autoBad = resolveSessionEnding({
+    character: { isNationSim: true, name: '국가의 시대' },
+    nextNationState: { name: '대한민국', approval: 8, stability: 15, power: 40, military: 50 },
+    storyArc: { turn: 4, targetTurns: 14, isEndless: false, isFinalTurn: false },
+    aiEnding: null,
+  });
+  assert.equal(autoBad.type, 'bad');
+  assert.ok(autoBad.title.includes('탄핵'));
+
+  // 5. Final turn guarantees ending resolution
+  const autoTrue = resolveSessionEnding({
+    character: { isNationSim: false, name: '아델라이드' },
+    nextAffinity: 88,
+    storyArc: { turn: 14, targetTurns: 14, isEndless: false, isFinalTurn: true },
+    aiEnding: null,
+  });
+  assert.equal(autoTrue.type, 'true');
 });
 
 test('Static web catalog bundle contains all 50 built-in worlds including 《국가의 시대》', () => {

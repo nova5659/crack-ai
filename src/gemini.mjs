@@ -105,6 +105,27 @@ function normalizeChoiceText(raw) {
   return s.slice(0, 120);
 }
 
+function normalizeEnding(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const typeRaw = String(raw.type || '').toLowerCase();
+  const type = ['true', 'good', 'bittersweet', 'bad'].includes(typeRaw) ? typeRaw : 'good';
+  const defaultLabels = {
+    true: 'TRUE ENDING · 진엔딩',
+    good: 'GOOD ENDING · 굿엔딩',
+    bittersweet: 'BITTERSWEET ENDING · 여운 엔딩',
+    bad: 'BAD ENDING · 배드엔딩',
+  };
+  const title = String(raw.title || '').trim().slice(0, 60);
+  if (!title) return null;
+  return {
+    type,
+    code: String(raw.code || defaultLabels[type]).trim().slice(0, 42),
+    title,
+    summary: String(raw.summary || '').trim().slice(0, 260),
+    reachedAt: new Date().toISOString(),
+  };
+}
+
 export function parseStateTag(fullText = '') {
   const match = fullText.match(STATE_TAG_REGEX);
   let stateUpdate = null;
@@ -114,11 +135,14 @@ export function parseStateTag(fullText = '') {
       const parsed = JSON.parse(rawJson);
       const rawDelta = Number(parsed.affinityDelta);
       const delta = Number.isFinite(rawDelta)
-        ? Math.max(-5, Math.min(6, Math.round(rawDelta)))
+        ? Math.max(-8, Math.min(6, Math.round(rawDelta)))
         : 0;
       const mood = typeof parsed.mood === 'string' && parsed.mood.trim()
         ? parsed.mood.trim().slice(0, 28)
         : null;
+      const outcomeRaw = String(parsed.outcome || '').toLowerCase();
+      const outcome = ['fail', 'setback', 'mixed', 'success'].includes(outcomeRaw) ? outcomeRaw : null;
+      const ending = normalizeEnding(parsed.ending);
       let nation = null;
       if (parsed.nation && typeof parsed.nation === 'object') {
         const n = parsed.nation;
@@ -136,12 +160,16 @@ export function parseStateTag(fullText = '') {
       const choices = Array.isArray(parsed.choices)
         ? parsed.choices.map(normalizeChoiceText).filter(Boolean).slice(0, 3)
         : [];
-      stateUpdate = { affinityDelta: delta, mood, nation, choices };
+      stateUpdate = { affinityDelta: delta, mood, outcome, ending, nation, choices };
     } catch {
       // Defensive fallback if an unescaped quote broke JSON.parse
       const dMatch = rawJson.match(/"affinityDelta"\s*:\s*(-?\d+)/);
       const mMatch = rawJson.match(/"mood"\s*:\s*"([^"]{1,28})"/);
+      const oMatch = rawJson.match(/"outcome"\s*:\s*"(fail|setback|mixed|success)"/i);
       const cMatch = rawJson.match(/"choices"\s*:\s*\[([\s\S]*?)\]/);
+      const eTitle = rawJson.match(/"ending"\s*:\s*\{[\s\S]*?"title"\s*:\s*"([^"]+)"/);
+      const eType = rawJson.match(/"ending"\s*:\s*\{[\s\S]*?"type"\s*:\s*"(true|good|bittersweet|bad)"/i);
+      const eSum = rawJson.match(/"ending"\s*:\s*\{[\s\S]*?"summary"\s*:\s*"([^"]+)"/);
       const choices = [];
       if (cMatch) {
         const itemRe = /"((?:\\.|[^"\\])+)"/g;
@@ -151,11 +179,16 @@ export function parseStateTag(fullText = '') {
           if (txt) choices.push(txt);
         }
       }
-      if (dMatch || mMatch || choices.length) {
+      const ending = eTitle
+        ? normalizeEnding({ type: eType?.[1] || 'good', title: eTitle[1], summary: eSum?.[1] || '' })
+        : null;
+      if (dMatch || mMatch || oMatch || ending || choices.length) {
         const rawDelta = dMatch ? Number(dMatch[1]) : 0;
         stateUpdate = {
-          affinityDelta: Number.isFinite(rawDelta) ? Math.max(-5, Math.min(6, Math.round(rawDelta))) : 0,
+          affinityDelta: Number.isFinite(rawDelta) ? Math.max(-8, Math.min(6, Math.round(rawDelta))) : 0,
           mood: mMatch ? mMatch[1].trim() : null,
+          outcome: oMatch ? oMatch[1].toLowerCase() : null,
+          ending,
           nation: null,
           choices,
         };

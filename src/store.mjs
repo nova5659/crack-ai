@@ -334,6 +334,7 @@ export function listSessions(characterId = null) {
     .map((s) => {
       const char = chars.get(s.characterId);
       const lastMsg = s.messages?.[s.messages.length - 1];
+      const turnCount = Array.isArray(s.messages) ? s.messages.filter((m) => m.role === 'user').length : 0;
       return {
         id: s.id,
         characterId: s.characterId,
@@ -346,6 +347,11 @@ export function listSessions(characterId = null) {
         affinity: s.affinity,
         mood: s.mood,
         relationshipStage: s.relationshipStage,
+        storyLength: s.storyLength || 'standard',
+        targetTurns: typeof s.targetTurns === 'number' ? s.targetTurns : 14,
+        difficulty: s.difficulty || 'real',
+        turnCount,
+        ending: s.ending || null,
         messageCount: s.messages?.length || 0,
         lastPreview: lastMsg ? String(lastMsg.content).replace(/\s+/g, ' ').slice(0, 90) : '',
         createdAt: s.createdAt,
@@ -377,7 +383,11 @@ export function createSession({ characterId, personaId, title }) {
     title: title || `${char.name} · ${new Date().toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })} 이야기`,
     personaId: persona.id,
     storyRoute: 'if', // 'canon' | 'if'
-    nationMode: 'realistic', // 'realistic' | 'surreal'
+    nationMode: 'realistic', // 'realistic' | 'crisis'
+    storyLength: 'standard', // 'short' (8) | 'standard' (14) | 'long' (24) | 'endless' (0)
+    targetTurns: 14,
+    difficulty: 'real', // 'real' | 'hardcore' | 'story'
+    ending: null,
     nationState: char.initialNationState ? structuredClone(char.initialNationState) : null,
     userNote: '',
     summaryMemory: '',
@@ -455,6 +465,7 @@ export function resetSession(sessionId) {
   const reset = {
     ...curr,
     nationState: char.initialNationState ? structuredClone(char.initialNationState) : null,
+    ending: null,
     summaryMemory: '',
     affinity: char.initialAffinity ?? 35,
     mood: char.initialMood || '호기심 어린 시선',

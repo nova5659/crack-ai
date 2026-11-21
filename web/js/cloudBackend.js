@@ -112,6 +112,111 @@ function isInvalidKeyError(status, errMsg = '') {
   return /api[\s_-]*key[\s_-]*(not[\s_-]*valid|invalid|expired)|API_KEY_INVALID/i.test(String(errMsg || ''));
 }
 
+const STORY_LENGTH_TURNS = {
+  short: 8,
+  standard: 14,
+  long: 24,
+  endless: 0,
+};
+
+function computeStoryArc(session = {}) {
+  const storyLength = session.storyLength || 'standard';
+  const targetTurns = typeof session.targetTurns === 'number' ? session.targetTurns : (STORY_LENGTH_TURNS[storyLength] ?? 14);
+  const isEndless = storyLength === 'endless' || targetTurns <= 0;
+  const turn = Math.max(0, Array.isArray(session.messages) ? session.messages.filter((m) => m.role === 'user').length : Number(session.turnCount || 0));
+  if (isEndless) {
+    return { storyLength: 'endless', turn, targetTurns: 0, remainingTurns: null, progressPct: 0, actIndex: 0, actLabel: '자유 연재 모드', isEndless: true, isClimax: false, isFinalTurn: false };
+  }
+  const ratio = targetTurns > 0 ? turn / targetTurns : 0;
+  let actIndex = 1;
+  let actLabel = '제1막 · 발단';
+  if (ratio > 0.82 || turn >= targetTurns) { actIndex = 4; actLabel = '제4막 · 최종 결말'; }
+  else if (ratio > 0.55) { actIndex = 3; actLabel = '제3막 · 위기와 절정'; }
+  else if (ratio > 0.25) { actIndex = 2; actLabel = '제2막 · 전개와 갈등'; }
+  const remainingTurns = Math.max(0, targetTurns - turn);
+  return {
+    storyLength,
+    turn,
+    targetTurns,
+    remainingTurns,
+    progressPct: Math.min(100, Math.round((turn / targetTurns) * 100)),
+    actIndex,
+    actLabel,
+    isEndless: false,
+    isClimax: remainingTurns > 0 && remainingTurns <= 2,
+    isFinalTurn: turn >= targetTurns,
+  };
+}
+
+function rollFateJudgment({ session = {}, character = {}, difficulty = null, storyArc = null } = {}) {
+  const diff = difficulty || session.difficulty || 'real';
+  const arc = storyArc || computeStoryArc(session);
+  if (character?.isNationSim && arc.turn <= 1) {
+    return { roll: 55, outcome: 'mixed', label: '위기 개시', directive: '취임/개국 첫 브리핑 턴입니다. 순탄한 출발이 아니라 당장 해결해야 할 날카로운 복합 위기와 압박 요소를 분명히 제시하세요.' };
+  }
+  let roll = Math.floor(Math.random() * 100) + 1;
+  if (character?.isNationSim && session.nationState) {
+    const app = Number(session.nationState.approval ?? 58);
+    const stab = Number(session.nationState.stability ?? 68);
+    if (app <= 30 || stab <= 30) roll = Math.max(1, roll - 12);
+    if (session.nationMode === 'crisis' || session.nationMode === 'surreal') roll = Math.max(1, roll - 8);
+  } else if (Number(session.affinity ?? 35) <= 20) {
+    roll = Math.max(1, roll - 10);
+  }
+  const th = diff === 'hardcore' ? { fail: 32, setback: 62, mixed: 86 } : diff === 'story' ? { fail: 10, setback: 28, mixed: 65 } : { fail: 24, setback: 50, mixed: 80 };
+  if (roll <= th.fail) {
+    return { roll, outcome: 'fail', label: '실패 · 역풍', directive: '[이번 턴 운명 판정: 명백한 실패 / 치명적 역풍] 절대 유저의 계획을 성공시켜 주지 마세요! 상대의 반격, 함정, 힘·자원의 한계, 내부 반발 또는 거절로 인해 이번 시도가 뚜렷하게 실패하고 뼈아픈 손실(부상, 신뢰·호감도 하락, 지지율·국고 급락, 주도권 상실)을 입게 하세요.' };
+  }
+  if (roll <= th.setback) {
+    return { roll, outcome: 'setback', label: '난항 · 값비싼 대가', directive: '[이번 턴 운명 판정: 난항 / 값비싼 대가] 의도한 대로 풀리지 않습니다. 목표 달성에 실패해 물러서거나, 간신히 버텨내더라도 치명적인 대가(큰 피해, 동맹 이탈, 감정적 균열)를 치르게 하세요.' };
+  }
+  if (roll <= th.mixed) {
+    return { roll, outcome: 'mixed', label: '조건부 돌파', directive: '[이번 턴 운명 판정: 부분 성공 / 조건부 돌파] 계획이 합리적이라면 절반의 성과는 얻되, 적의 반격·부작용·새로운 대가가 즉각 따라붙게 전개하세요. 계획이 무모하다면 가차 없이 실패시키세요.' };
+  }
+  return { roll, outcome: 'success', label: '결정적 돌파', directive: '[이번 턴 운명 판정: 돌파구 확보] 유저의 선택이 상황상 타당하고 설득력 있을 때만 값진 성과를 허락하세요. 무모한 행동이나 준비 없는 기적은 여전히 실패로 판정하세요.' };
+}
+
+function normalizeEnding(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const typeRaw = String(raw.type || '').toLowerCase();
+  const type = ['true', 'good', 'bittersweet', 'bad'].includes(typeRaw) ? typeRaw : 'good';
+  const labels = { true: 'TRUE ENDING · 진엔딩', good: 'GOOD ENDING · 굿엔딩', bittersweet: 'BITTERSWEET ENDING · 여운 엔딩', bad: 'BAD ENDING · 배드엔딩' };
+  const title = String(raw.title || '').trim().slice(0, 60);
+  if (!title) return null;
+  return { type, code: String(raw.code || labels[type]).trim().slice(0, 42), title, summary: String(raw.summary || '').trim().slice(0, 260), reachedAt: new Date().toISOString() };
+}
+
+function resolveSessionEnding({ character = {}, nextAffinity = 35, nextNationState = null, storyArc = null, aiEnding = null, prevEnding = null } = {}) {
+  if (prevEnding) return prevEnding;
+  if (aiEnding && aiEnding.title) return aiEnding;
+  const turn = storyArc?.turn || 0;
+  if (character.isNationSim && nextNationState && turn >= 2) {
+    const app = Number(nextNationState.approval ?? 55);
+    const stab = Number(nextNationState.stability ?? 65);
+    const pow = Number(nextNationState.power ?? 65);
+    const mil = Number(nextNationState.military ?? 65);
+    if (app <= 10 || stab <= 10) return { type: 'bad', code: 'BAD ENDING · 정권 붕괴', title: '무너진 집무실과 탄핵의 밤', summary: `민심(${app}%)과 국내 안정도(${stab}%)가 임계점 이하로 추락하며 통치 기반이 완전히 붕괴했습니다.`, reachedAt: new Date().toISOString() };
+    if (pow <= 10 || mil <= 10) return { type: 'bad', code: 'BAD ENDING · 국가 패망', title: '꺼져버린 국운', summary: `국력(${pow})과 군사력(${mil})이 고갈되어 국가의 자주권과 존립을 지켜내지 못했습니다.`, reachedAt: new Date().toISOString() };
+  }
+  if (!character.isNationSim && nextAffinity <= 5 && turn >= 3) {
+    return { type: 'bad', code: 'BAD ENDING · 파국', title: '돌이킬 수 없는 결별과 파멸', summary: `${character.name || '인물'}과의 신뢰가 완전히 무너지고, 치명적인 오판 끝에 이야기가 비극적으로 막을 내렸습니다.`, reachedAt: new Date().toISOString() };
+  }
+  if (storyArc && !storyArc.isEndless && storyArc.isFinalTurn) {
+    if (character.isNationSim && nextNationState) {
+      const avg = Math.round((Number(nextNationState.power ?? 60) + Number(nextNationState.approval ?? 55) + Number(nextNationState.stability ?? 60) + Number(nextNationState.military ?? 60)) / 4);
+      if (avg >= 76) return { type: 'true', code: 'TRUE ENDING · 시대의 성군', title: `${nextNationState.name || '국가'}의 황금시대`, summary: '수많은 위기와 외교전을 뚫고 국력·민심·안보를 모두 정점에 올려놓으며 역사에 길이 남을 업적을 세웠습니다.', reachedAt: new Date().toISOString() };
+      if (avg >= 58) return { type: 'good', code: 'GOOD ENDING · 버텨낸 시대', title: '격랑 끝에 지켜낸 나라', summary: '치열한 갈등과 대가 속에서도 국가의 기틀을 지켜내며 다음 세대로 바통을 넘겼습니다.', reachedAt: new Date().toISOString() };
+      if (avg >= 40) return { type: 'bittersweet', code: 'BITTERSWEET ENDING · 상처뿐인 생존', title: '미완의 개혁과 남은 숙제', summary: '최악의 파국은 면했으나 깊은 상처와 분열을 남긴 채 임기의 끝을 맞았습니다.', reachedAt: new Date().toISOString() };
+      return { type: 'bad', code: 'BAD ENDING · 쇠락의 기록', title: '역사의 심판대 앞에서', summary: '연이은 실정과 위기 대응 실패로 국력이 크게 쇠퇴하며 비극적인 평가를 남겼습니다.', reachedAt: new Date().toISOString() };
+    }
+    if (nextAffinity >= 75) return { type: 'true', code: 'TRUE ENDING · 진엔딩', title: '끝내 지켜낸 운명의 결말', summary: `수많은 시련과 갈등을 정면으로 돌파해 ${character.name || '인물'}과 함께 최고의 결말에 도달했습니다.`, reachedAt: new Date().toISOString() };
+    if (nextAffinity >= 52) return { type: 'good', code: 'GOOD ENDING · 굿엔딩', title: '새로운 내일의 문턱에서', summary: '완벽하진 않았지만 치열한 선택 끝에 각자의 길을 지켜내며 이야기를 매듭지었습니다.', reachedAt: new Date().toISOString() };
+    if (nextAffinity >= 30) return { type: 'bittersweet', code: 'BITTERSWEET ENDING · 여운 엔딩', title: '지키지 못한 약속의 잔향', summary: '모든 것을 지키지는 못한 채, 깊은 여운과 상처를 안고 이 장의 막을 내렸습니다.', reachedAt: new Date().toISOString() };
+    return { type: 'bad', code: 'BAD ENDING · 배드엔딩', title: '어긋난 선택의 끝', summary: '반복된 실패와 균열을 끝내 되돌리지 못한 채 비극적인 결말을 맞이했습니다.', reachedAt: new Date().toISOString() };
+  }
+  return null;
+}
+
 function normalizeChoiceText(raw) {
   let s = String(raw || '').trim();
   if (!s) return '';
@@ -127,8 +232,11 @@ function parseStateTag(fullText = '') {
     try {
       const parsed = JSON.parse(rawJson);
       const rawDelta = Number(parsed.affinityDelta);
-      const delta = Number.isFinite(rawDelta) ? Math.max(-5, Math.min(6, Math.round(rawDelta))) : 0;
+      const delta = Number.isFinite(rawDelta) ? Math.max(-8, Math.min(6, Math.round(rawDelta))) : 0;
       const mood = typeof parsed.mood === 'string' && parsed.mood.trim() ? parsed.mood.trim().slice(0, 28) : null;
+      const outcomeRaw = String(parsed.outcome || '').toLowerCase();
+      const outcome = ['fail', 'setback', 'mixed', 'success'].includes(outcomeRaw) ? outcomeRaw : null;
+      const ending = normalizeEnding(parsed.ending);
       let nation = null;
       if (parsed.nation && typeof parsed.nation === 'object') {
         const n = parsed.nation;
@@ -146,11 +254,15 @@ function parseStateTag(fullText = '') {
       const choices = Array.isArray(parsed.choices)
         ? parsed.choices.map(normalizeChoiceText).filter(Boolean).slice(0, 3)
         : [];
-      stateUpdate = { affinityDelta: delta, mood, nation, choices };
+      stateUpdate = { affinityDelta: delta, mood, outcome, ending, nation, choices };
     } catch {
       const dMatch = rawJson.match(/"affinityDelta"\s*:\s*(-?\d+)/);
       const mMatch = rawJson.match(/"mood"\s*:\s*"([^"]{1,28})"/);
+      const oMatch = rawJson.match(/"outcome"\s*:\s*"(fail|setback|mixed|success)"/i);
       const cMatch = rawJson.match(/"choices"\s*:\s*\[([\s\S]*?)\]/);
+      const eTitle = rawJson.match(/"ending"\s*:\s*\{[\s\S]*?"title"\s*:\s*"([^"]+)"/);
+      const eType = rawJson.match(/"ending"\s*:\s*\{[\s\S]*?"type"\s*:\s*"(true|good|bittersweet|bad)"/i);
+      const eSum = rawJson.match(/"ending"\s*:\s*\{[\s\S]*?"summary"\s*:\s*"([^"]+)"/);
       const choices = [];
       if (cMatch) {
         const itemRe = /"((?:\\.|[^"\\])+)"/g;
@@ -160,11 +272,14 @@ function parseStateTag(fullText = '') {
           if (txt) choices.push(txt);
         }
       }
-      if (dMatch || mMatch || choices.length) {
+      const ending = eTitle ? normalizeEnding({ type: eType?.[1] || 'good', title: eTitle[1], summary: eSum?.[1] || '' }) : null;
+      if (dMatch || mMatch || oMatch || ending || choices.length) {
         const rawDelta = dMatch ? Number(dMatch[1]) : 0;
         stateUpdate = {
-          affinityDelta: Number.isFinite(rawDelta) ? Math.max(-5, Math.min(6, Math.round(rawDelta))) : 0,
+          affinityDelta: Number.isFinite(rawDelta) ? Math.max(-8, Math.min(6, Math.round(rawDelta))) : 0,
           mood: mMatch ? mMatch[1].trim() : null,
+          outcome: oMatch ? oMatch[1].toLowerCase() : null,
+          ending,
           nation: null,
           choices,
         };
@@ -258,7 +373,7 @@ function findTriggeredLorebooks(lorebook = [], recentMessages = [], latestUserTe
   return matched.slice(0, 6);
 }
 
-function buildSystemInstruction({ character, session, persona, triggeredLorebooks, outputLength = 'medium', viewMode = 'novel', isContinue = false }) {
+function buildSystemInstruction({ character, session, persona, triggeredLorebooks, outputLength = 'medium', viewMode = 'novel', isContinue = false, storyArc = null, fateRoll = null }) {
   const ctx = { userName: persona?.name || '나', charName: character.name };
   const lenMap = {
     short: '분량 가이드: 간결하고 호흡 빠르게 2~3문단(약 200~340자)으로 한 장면을 깔끔하게 끊어 쓰세요.',
@@ -313,28 +428,46 @@ function buildSystemInstruction({ character, session, persona, triggeredLorebook
     parts.push(`\n[발동된 로어북]\n${triggeredLorebooks.map((l) => `- ${l.title}: ${renderTemplate(l.content, ctx)}`).join('\n')}`);
   }
   parts.push(`\n[현재 감정 상태]\n- 호감도: ${session.affinity ?? 35}/100 · 감정: ${session.mood || '호기심'} · 관계: ${session.relationshipStage || '첫 만남'}`);
+  const arc = storyArc || computeStoryArc(session);
+  const fate = fateRoll || rollFateJudgment({ session, character, storyArc: arc });
+  const arcRule = arc.isEndless
+    ? `- 현재 진행: 자유 연재 모드 (${arc.turn}턴째). 단, 회복 불가능한 파국(사망·임무 완전 실패·국가 붕괴/탄핵·관계 영구 파탄)에 도달하면 즉시 배드엔딩으로 완결하세요.`
+    : arc.isFinalTurn
+      ? `- 🚨 [최종화 도달 · ${arc.turn}/${arc.targetTurns}턴 · 반드시 완결 엔딩 집필!] 이번 턴이 이 작품의 마지막 화입니다! 지금까지의 선택·성공과 실패를 총결산해 완결된 클라이맥스와 여운 깊은 에필로그를 집필하고, 반드시 마지막 줄 CRACK_STATE의 "ending" 필드에 결말을 기록하세요! (실패가 많았거나 치명적 오판을 했다면 가차 없이 bad/bittersweet 엔딩!)`
+      : arc.isClimax
+        ? `- ⚡ [최종 결말 직전 · ${arc.actLabel} · ${arc.turn}/${arc.targetTurns}턴 · 완결까지 ${arc.remainingTurns}턴] 모든 복선과 갈등을 최후의 결전·선택으로 수렴시키세요. 치명적 파국 시 즉시 조기 배드엔딩 가능.`
+        : `- 현재 진행: ${arc.actLabel} (${arc.turn}/${arc.targetTurns}턴 · 완결까지 ${arc.remainingTurns}턴 남음). 기승전결 호흡으로 이야기를 실질적으로 전진시키되, 회복 불가능한 치명적 실패 발생 시 즉시 조기 배드엔딩으로 완결하세요.`;
+
   const userRefGuide =
     ctx.userName === '나'
       ? '유저 주권 및 시점 절대 규칙: 유저의 기본 이름이 "나"로 되어 있더라도 AI가 절대 1인칭("내 목소리", "내 귓가", "나를 바라보는 가운데")으로 시점을 가로채지 마세요! 또한 절대 유저의 대사·연설·명령·행동을 AI가 대신 지어내 쓰지 마세요. 철저히 3인칭 관찰자/캐릭터 시점에서 유저의 실제 입력에 대한 세계와 인물의 반응만 서술하세요.'
       : `유저 주권 및 시점 절대 규칙: 지문에서는 "${ctx.userName}"을(를) 자연스러운 3인칭으로 호칭하고, 대사에서는 캐릭터 성격에 맞는 호칭으로 부르세요. 절대 "${ctx.userName}"의 대사·연설·행동·결정을 AI가 대신 지어내 쓰지 마세요.`;
 
-  parts.push(`\n[전 작품 공통 최상위 서사 헌장 · 절대 엄수]
+  parts.push(`\n[공정한 판정 · 실제 실패 허용 규칙 (무조건 성공/아첨 절대 금지!)]
+- 당신은 유저 비위를 맞추는 아첨꾼이 아니라 냉정하고 공정한 스토리 심판관입니다.
+- 준비 부족·무모한 시도·강적·현실적 반발 앞에서는 가차 없이 실패·좌절·거절·부상·배신·역풍을 겪게 만드세요.
+- ${fate.directive}
+
+[스토리 완결 구조 · 기승전결 & 멀티 엔딩]
+${arcRule}
+
+[전 작품 공통 최상위 서사 헌장 · 절대 엄수]
 1. [진지한 서사 몰입 & 개연성 절대 수호]
    - 이 작품의 세계관·인물·갈등·생사와 운명을 실제 대작 드라마·베스트셀러 연재 웹소설·극장판 본편 수준의 진지함으로 집필합니다.
    - 황당한 병맛 전개, 억지 개그, 인터넷 밈(SNS 밈, 배달앱, 음식/동물/외계인 드립, 유치한 패러디), 메타 발언을 절대 금지합니다.
    - 사용자가 가볍거나 도발적인 입력을 하더라도 장난에 동조해 망가지지 말고, 세계관 내부의 현실적이고 묵직한 반응(당혹, 냉정한 제지, 신뢰 하락, 현실적 파장)으로 작품의 품격을 지키세요.
 2. [진심으로 이어지는 연재 스토리 아크 & 인과관계]
    - 매 턴은 긴 서사가 이어지는 다음 화(Episode)입니다. 이전 턴의 사건·약속·상처·비밀·세력 구도·위치와 자세·시간의 흐름을 단 하나도 놓치지 말고 치밀하게 이어받으세요.
-   - 단순히 맞장구만 치지 말고, 주변 인물·적대 세력·정세도 각자의 목적대로 움직이며 매 턴 이야기가 실제로 한 걸음 전진하고 실질적인 대가와 연쇄 결과(Consequences)가 따르게 하세요.
+   - 주변 인물·적대 세력·정세도 각자의 목적대로 움직이며 매 턴 이야기가 실제로 한 걸음 전진하고 실질적인 대가와 연쇄 결과(Consequences)가 따르게 하세요.
 3. ${styleMap[viewMode] || styleMap.novel}
 4. ${lenMap[outputLength] || lenMap.medium}
 5. ${userRefGuide}
 6. [AI 번역투·클리셰 금지] "~한 것일까", "고스란히 담겨 있었다", "묘한 ~이 스쳤다", "기묘한 침묵이 흘렀다", "어때, 감이 좀 와?", "이제 진짜 시작이야!" 같은 상투적 AI 표현을 절대 쓰지 마세요.
-7. ${isContinue ? '방금 끊긴 문장과 장면의 숨결을 그대로 이어받아 다음 사건과 대사로 매끄럽게 전개하세요.' : '상대방의 직전 대사·행동에 즉각적이고 묵직하게 반응하며, 마지막 문장은 다음 화의 선택으로 자연스럽게 이어지는 긴장감 있는 장면으로 열어두세요.'}
-8. 맨 마지막 줄에만(줄바꿈 1회 후) 숨김 상태 태그 1줄을 덧붙이세요. 본문 안에 JSON·**[다음 선택지]** 번호 목록을 중복으로 쓰지 말고, choices 배열에만 방금 끝난 장면의 갈등을 진지하게 이어받아 다음 화 핵심 분기가 될 서로 다른 선택지 3개(각 15~52자, 내부 대사는 작은따옴표 '...'만 사용, 장난·드립 금지)를 반드시 포함하세요:
+7. ${isContinue ? '방금 끊긴 문장과 장면의 숨결을 그대로 이어받아 다음 사건과 대사로 매끄럽게 전개하세요.' : arc.isFinalTurn ? '모든 갈등과 감정의 매듭을 짓고 깊은 여운을 남기는 완결 에필로그로 마무리하세요.' : '상대방의 직전 대사·행동에 냉정하고 입체적으로 반응하며, 마지막 문장은 다음 화의 선택으로 자연스럽게 이어지는 긴장감 있는 장면으로 열어두세요.'}
+8. 맨 마지막 줄에만(줄바꿈 1회 후) 숨김 상태 태그 1줄을 덧붙이세요. 본문 안에 JSON·**[다음 선택지]** 번호 목록을 중복으로 쓰지 마세요. "outcome"은 이번 턴 결과("fail"|"setback"|"mixed"|"success"), 엔딩 미도달 시 "ending":null (${arc.isFinalTurn ? '최종화이므로 반드시 "ending":{"type":"true|good|bittersweet|bad","code":"...","title":"...","summary":"..."} 채우기!' : '조기 배드엔딩 도달 시에만 채우기'}), choices에는 진지한 선택지 3개(엔딩 시 []):
 ${character.isNationSim
-  ? '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재정국2~12자","nation":{"name":"국가명","date":"YYYY년 M월 (N턴)","power":0~100정수,"treasury":"재정요약","approval":0~100정수,"military":0~100정수,"stability":0~100정수},"choices":["결단력 있는 정책·지시 1문장","외교·정치적 승부수 1문장","신중한 정보·실무 파악 1문장"]}-->'
-  : '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재감정2~12자","choices":["정면 돌파 행동·대사 1문장","진지한 심리·감정 대사 1문장","신중한 탐색·전략 행동 1문장"]}-->'}`);
+  ? '<!--CRACK_STATE:{"affinityDelta":정수(-6~+5),"mood":"현재정국2~12자","outcome":"fail|setback|mixed|success","ending":null,"nation":{"name":"국가명","date":"YYYY년 M월 (N턴)","power":0~100정수,"treasury":"재정요약","approval":0~100정수,"military":0~100정수,"stability":0~100정수},"choices":["결단력 있는 정책·지시 1문장","외교·정치적 승부수 1문장","신중한 정보·실무 파악 1문장"]}-->'
+  : '<!--CRACK_STATE:{"affinityDelta":정수(-6~+5),"mood":"현재감정2~12자","outcome":"fail|setback|mixed|success","ending":null,"choices":["정면 돌파 행동·대사 1문장","진지한 심리·감정 대사 1문장","신중한 탐색·전략 행동 1문장"]}-->'}`);
 
   return parts.join('\n');
 }
@@ -1039,6 +1172,7 @@ export const cloudBackend = {
       .map((s) => {
         const c = chars.get(s.characterId);
         const last = s.messages?.[s.messages.length - 1];
+        const turnCount = Array.isArray(s.messages) ? s.messages.filter((m) => m.role === 'user').length : 0;
         return {
           id: s.id,
           characterId: s.characterId,
@@ -1049,6 +1183,11 @@ export const cloudBackend = {
           affinity: s.affinity,
           mood: s.mood,
           relationshipStage: s.relationshipStage,
+          storyLength: s.storyLength || 'standard',
+          targetTurns: typeof s.targetTurns === 'number' ? s.targetTurns : 14,
+          difficulty: s.difficulty || 'real',
+          turnCount,
+          ending: s.ending || null,
           messageCount: s.messages?.length || 0,
           lastPreview: last ? String(last.content).replace(/\s+/g, ' ').slice(0, 90) : '',
           updatedAt: s.updatedAt,
@@ -1073,6 +1212,10 @@ export const cloudBackend = {
       personaId: persona.id,
       storyRoute: 'if',
       nationMode: 'realistic',
+      storyLength: 'standard',
+      targetTurns: 14,
+      difficulty: 'real',
+      ending: null,
       nationState: char.initialNationState ? structuredClone(char.initialNationState) : null,
       userNote: '',
       summaryMemory: '',
@@ -1115,6 +1258,9 @@ export const cloudBackend = {
     if (idx === -1) throw new Error('세션을 찾을 수 없습니다.');
     const curr = sessions[idx];
     const next = { ...curr, ...patch, updatedAt: new Date().toISOString() };
+    if (patch.storyLength && STORY_LENGTH_TURNS[patch.storyLength] !== undefined) {
+      next.targetTurns = STORY_LENGTH_TURNS[patch.storyLength];
+    }
     if (typeof patch.affinity === 'number') {
       const char = (await listCharactersCloud()).find((c) => c.id === curr.characterId);
       next.affinity = Math.max(0, Math.min(100, Math.round(patch.affinity)));
@@ -1153,6 +1299,7 @@ export const cloudBackend = {
     const reset = {
       ...curr,
       nationState: char.initialNationState ? structuredClone(char.initialNationState) : null,
+      ending: null,
       summaryMemory: '',
       affinity: char.initialAffinity ?? 35,
       mood: char.initialMood || '호기심 어린 시선',
@@ -1196,7 +1343,7 @@ export const cloudBackend = {
     const { session } = await this.getSession(sessionId);
     const idx = session.messages.findIndex((m) => m.id === messageId);
     if (idx === -1) return { session };
-    return this.updateSession(sessionId, { messages: session.messages.slice(0, idx + 1) });
+    return this.updateSession(sessionId, { ending: null, messages: session.messages.slice(0, idx + 1) });
   },
 
   async exportStoryMarkdown(sessionId) {
@@ -1246,6 +1393,8 @@ export const cloudBackend = {
 
     const historyForPrompt = action === 'regenerate' ? session.messages.slice(0, -1) : session.messages;
     const triggered = findTriggeredLorebooks(session.lorebook || character.lorebook || [], historyForPrompt, userText);
+    const storyArc = computeStoryArc({ ...session, messages: historyForPrompt });
+    const fateRoll = rollFateJudgment({ session, character, difficulty: session.difficulty || 'real', storyArc });
     const systemInstruction = buildSystemInstruction({
       character,
       session,
@@ -1254,6 +1403,8 @@ export const cloudBackend = {
       outputLength: payload.outputLength || cfg.outputLength || 'medium',
       viewMode: payload.viewMode || cfg.viewMode || 'novel',
       isContinue: action === 'continue',
+      storyArc,
+      fateRoll,
     });
     const contents = buildGeminiContents(historyForPrompt, {
       continueCue: action === 'continue',
@@ -1286,6 +1437,22 @@ export const cloudBackend = {
       const finalText = result.text || '*(잠시 말이 끊어졌다.)*';
       const nextAff = Math.max(0, Math.min(100, (session.affinity ?? 35) + (result.stateUpdate?.affinityDelta || 0)));
       const nextMood = result.stateUpdate?.mood || session.mood;
+      const resolvedOutcome = result.stateUpdate?.outcome || fateRoll.outcome;
+      const nextNationState = result.stateUpdate?.nation
+        ? {
+            ...(session.nationState || {}),
+            ...Object.fromEntries(Object.entries(result.stateUpdate.nation).filter(([, v]) => v !== undefined)),
+          }
+        : session.nationState;
+      const resolvedEnding = resolveSessionEnding({
+        character,
+        nextAffinity: nextAff,
+        nextNationState,
+        storyArc,
+        aiEnding: result.stateUpdate?.ending || null,
+        prevEnding: action === 'regenerate' ? null : session.ending,
+      });
+
       const meta = {
         model: result.modelUsed,
         fallbackFrom: result.fallbackFrom,
@@ -1293,6 +1460,7 @@ export const cloudBackend = {
         triggeredLorebooks: triggered.map((l) => l.title),
         affinityDelta: result.stateUpdate?.affinityDelta || 0,
         mood: nextMood,
+        outcome: resolvedOutcome,
       };
 
       const msgs = [...session.messages];
@@ -1312,15 +1480,9 @@ export const cloudBackend = {
         msgs.push(savedMessage);
       }
 
-      const nextNationState = result.stateUpdate?.nation
-        ? {
-            ...(session.nationState || {}),
-            ...Object.fromEntries(Object.entries(result.stateUpdate.nation).filter(([, v]) => v !== undefined)),
-          }
-        : session.nationState;
-
-      const nextSuggestions =
-        Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
+      const nextSuggestions = resolvedEnding
+        ? []
+        : Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
           ? result.stateUpdate.choices
           : session.suggestedReplies;
 
@@ -1328,6 +1490,7 @@ export const cloudBackend = {
         affinity: nextAff,
         mood: nextMood,
         nationState: nextNationState,
+        ending: resolvedEnding,
         suggestedReplies: nextSuggestions,
         messages: msgs,
       });
@@ -1335,8 +1498,12 @@ export const cloudBackend = {
       if (onDone) {
         onDone({
           message: savedMessage,
-          suggestedReplies:
-            Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
+          outcome: resolvedOutcome,
+          ending: updated.ending || null,
+          storyArc: computeStoryArc(updated),
+          suggestedReplies: updated.ending
+            ? []
+            : Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
               ? result.stateUpdate.choices
               : [],
           sessionState: {
@@ -1344,6 +1511,7 @@ export const cloudBackend = {
             mood: updated.mood,
             relationshipStage: updated.relationshipStage,
             nationState: updated.nationState,
+            ending: updated.ending || null,
             messageCount: updated.messages.length,
           },
           modelUsed: result.modelUsed,

@@ -498,6 +498,9 @@
             </div>
           </header>
 
+          <!-- Story Arc Progress & Ending Tracker Ribbon (모든 작품 완결 진행도) -->
+          <div class="story-arc-bar" id="storyArcBar" role="button" tabindex="0" title="클릭해 스토리 분량·난이도 설정"></div>
+
           <!-- Nation Simulation Live Governance HUD (《국가의 시대》 전용) -->
           <div class="nation-hud-bar" id="nationHudBar" hidden></div>
 
@@ -596,6 +599,27 @@
                   <div class="insp-block">
                     <label class="insp-label">활성 페르소나 (내 프로필)</label>
                     <select id="sessionPersonaSelect" class="full-select"></select>
+                  </div>
+
+                  <div class="insp-block">
+                    <label class="insp-label">스토리 완결 분량 (기·승·전·결 엔딩)</label>
+                    <div class="segmented full" id="storyLengthToggle">
+                      <button class="seg-btn" data-slen="short">단편 8턴</button>
+                      <button class="seg-btn active" data-slen="standard">표준 14턴</button>
+                      <button class="seg-btn" data-slen="long">장편 24턴</button>
+                      <button class="seg-btn" data-slen="endless">∞ 자유</button>
+                    </div>
+                    <p class="field-hint">목표 턴에 도달하거나 치명적 파국(탄핵·패배·관계 파탄) 시 진엔딩/굿엔딩/새드/배드엔딩으로 완결됩니다.</p>
+                  </div>
+
+                  <div class="insp-block">
+                    <label class="insp-label">운명 판정 난이도 (실패·역풍 빈도)</label>
+                    <div class="segmented full" id="difficultyToggle">
+                      <button class="seg-btn active" data-diff="real">⚖️ 리얼 판정</button>
+                      <button class="seg-btn" data-diff="hardcore">🔥 하드코어</button>
+                      <button class="seg-btn" data-diff="story">📖 관대</button>
+                    </div>
+                    <p class="field-hint">리얼/하드코어에서는 무리한 시도나 변수에 의해 실제로 실패·역풍·조기 배드엔딩이 발생합니다.</p>
                   </div>
 
                   <div class="insp-block" id="storyRouteBlock" hidden>

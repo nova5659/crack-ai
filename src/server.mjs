@@ -34,10 +34,14 @@ import {
   updateSession,
 } from './store.mjs';
 import {
+  STORY_LENGTH_TURNS,
   buildGeminiContents,
   buildSystemInstruction,
+  computeStoryArc,
   findTriggeredLorebooks,
   relationshipStageForAffinity,
+  resolveSessionEnding,
+  rollFateJudgment,
 } from './promptBuilder.mjs';
 import {
   generateStructuredText,
@@ -223,6 +227,14 @@ async function handleChatStream(req, res, sessionId) {
     userTextForContext
   );
 
+  const storyArc = computeStoryArc({ ...workingSession, messages: historyForPrompt });
+  const fateRoll = rollFateJudgment({
+    session: workingSession,
+    character,
+    difficulty: workingSession.difficulty || 'real',
+    storyArc,
+  });
+
   const systemInstruction = buildSystemInstruction({
     character,
     session: workingSession,
@@ -231,6 +243,8 @@ async function handleChatStream(req, res, sessionId) {
     outputLength,
     viewMode,
     isContinue: action === 'continue',
+    storyArc,
+    fateRoll,
   });
 
   const contents = buildGeminiContents(historyForPrompt, {
@@ -288,10 +302,27 @@ async function handleChatStream(req, res, sessionId) {
     );
     const nextMood = result.stateUpdate?.mood || workingSession.mood;
     const nextStage = relationshipStageForAffinity(nextAffinity, character.relationshipStage);
+    const resolvedOutcome = result.stateUpdate?.outcome || fateRoll.outcome;
 
     let savedMessage = null;
     const updatedSession = updateSession(sessionId, (curr) => {
       const nextMessages = [...curr.messages];
+      const nextNationState = result.stateUpdate?.nation
+        ? {
+            ...(curr.nationState || {}),
+            ...Object.fromEntries(Object.entries(result.stateUpdate.nation).filter(([, v]) => v !== undefined)),
+          }
+        : curr.nationState;
+
+      const resolvedEnding = resolveSessionEnding({
+        character,
+        nextAffinity,
+        nextNationState,
+        storyArc,
+        aiEnding: result.stateUpdate?.ending || null,
+        prevEnding: action === 'regenerate' ? null : curr.ending,
+      });
+
       const meta = {
         model: result.modelUsed,
         fallbackFrom: result.fallbackFrom || null,
@@ -299,6 +330,7 @@ async function handleChatStream(req, res, sessionId) {
         triggeredLorebooks: triggeredLorebooks.map((l) => l.title),
         affinityDelta: result.stateUpdate?.affinityDelta || 0,
         mood: nextMood,
+        outcome: resolvedOutcome,
       };
 
       if (action === 'regenerate' && nextMessages.length > 0 && nextMessages[nextMessages.length - 1].role === 'model') {
@@ -326,15 +358,9 @@ async function handleChatStream(req, res, sessionId) {
         nextMessages.push(savedMessage);
       }
 
-      const nextNationState = result.stateUpdate?.nation
-        ? {
-            ...(curr.nationState || {}),
-            ...Object.fromEntries(Object.entries(result.stateUpdate.nation).filter(([, v]) => v !== undefined)),
-          }
-        : curr.nationState;
-
-      const nextSuggestions =
-        Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
+      const nextSuggestions = resolvedEnding
+        ? []
+        : Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
           ? result.stateUpdate.choices
           : curr.suggestedReplies;
 
@@ -344,15 +370,21 @@ async function handleChatStream(req, res, sessionId) {
         mood: nextMood,
         relationshipStage: nextStage,
         nationState: nextNationState,
+        ending: resolvedEnding,
         suggestedReplies: nextSuggestions,
         messages: nextMessages,
       };
     });
 
+    const finalArc = computeStoryArc(updatedSession);
     writeSse(res, 'done', {
       message: savedMessage,
-      suggestedReplies:
-        Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
+      outcome: resolvedOutcome,
+      ending: updatedSession.ending || null,
+      storyArc: finalArc,
+      suggestedReplies: updatedSession.ending
+        ? []
+        : Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
           ? result.stateUpdate.choices
           : [],
       sessionState: {
@@ -360,6 +392,7 @@ async function handleChatStream(req, res, sessionId) {
         mood: updatedSession.mood,
         relationshipStage: updatedSession.relationshipStage,
         nationState: updatedSession.nationState,
+        ending: updatedSession.ending || null,
         messageCount: updatedSession.messages.length,
       },
       modelUsed: result.modelUsed,
@@ -885,7 +918,7 @@ export function createAppServer({ port = getPort() } = {}) {
         const updated = updateSession(sessRewind[1], (curr) => {
           const idx = curr.messages.findIndex((m) => m.id === body.messageId);
           if (idx === -1) return curr;
-          return { ...curr, messages: curr.messages.slice(0, idx + 1) };
+          return { ...curr, ending: null, messages: curr.messages.slice(0, idx + 1) };
         });
         return updated ? sendJson(res, 200, { session: updated }) : sendError(res, 404, '세션을 찾을 수 없습니다.');
       }
@@ -966,7 +999,22 @@ export function createAppServer({ port = getPort() } = {}) {
             if (typeof body.summaryMemory === 'string') next.summaryMemory = body.summaryMemory.slice(0, 2000);
             if (typeof body.personaId === 'string') next.personaId = body.personaId;
             if (body.storyRoute === 'canon' || body.storyRoute === 'if') next.storyRoute = body.storyRoute;
-            if (body.nationMode === 'realistic' || body.nationMode === 'surreal') next.nationMode = body.nationMode;
+            if (['realistic', 'crisis', 'surreal'].includes(body.nationMode)) {
+              next.nationMode = body.nationMode === 'surreal' ? 'crisis' : body.nationMode;
+            }
+            if (['short', 'standard', 'long', 'endless'].includes(body.storyLength)) {
+              next.storyLength = body.storyLength;
+              next.targetTurns = STORY_LENGTH_TURNS[body.storyLength] ?? 14;
+            }
+            if (typeof body.targetTurns === 'number' && Number.isFinite(body.targetTurns)) {
+              next.targetTurns = Math.max(0, Math.min(60, Math.round(body.targetTurns)));
+            }
+            if (['real', 'hardcore', 'story'].includes(body.difficulty)) {
+              next.difficulty = body.difficulty;
+            }
+            if (body.ending === null) {
+              next.ending = null;
+            }
             if (typeof body.affinity === 'number') {
               next.affinity = Math.max(0, Math.min(100, Math.round(body.affinity)));
               const ch = getCharacter(curr.characterId);
