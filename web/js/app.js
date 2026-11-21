@@ -610,19 +610,17 @@ function bindStaticEvents() {
     switchView('creator');
   });
 
-  $('#deleteCurrentSessionBtn').addEventListener('click', async () => {
-    if (!state.activeSession) return;
-    if (!confirm('현재 채팅 기록을 삭제할까요?')) return;
-    try {
-      await api.deleteSession(state.activeSession.id);
-      state.activeSession = null;
-      await reloadSessions();
-      switchView('chats');
-      showToast('채팅방이 삭제되었습니다.');
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
+  $('#chatResetBtn')?.addEventListener('click', () => {
+    if (state.activeSession) handleResetSession(state.activeSession.id);
   });
+  $('#resetCurrentSessionBtn')?.addEventListener('click', () => {
+    if (state.activeSession) handleResetSession(state.activeSession.id);
+  });
+  $('#deleteCurrentSessionBtn').addEventListener('click', () => {
+    if (state.activeSession) handleDeleteSessionById(state.activeSession.id, true);
+  });
+  $('#clearAllSessionsSidebarBtn')?.addEventListener('click', handleClearAllSessions);
+  $('#clearAllChatsBtn')?.addEventListener('click', handleClearAllSessions);
 
   // Creator Events
   $('#wizardAutofillBtn').addEventListener('click', handleWizardAutofill);
@@ -1001,7 +999,7 @@ function renderContinuePlaying() {
     .slice(0, 6)
     .map(
       (s) => `
-      <button type="button" class="continue-card" data-csid="${s.id}">
+      <div class="continue-card" data-csid="${s.id}" role="button" tabindex="0">
         <img src="${escapeHtml(s.characterAvatar)}" alt="${escapeHtml(s.characterName)}" loading="lazy" />
         <div class="continue-meta">
           <div class="continue-top">
@@ -1012,15 +1010,31 @@ function renderContinuePlaying() {
           <div class="continue-foot">
             <span>♥ ${s.affinity}</span>
             <span>💬 ${s.messageCount}턴</span>
-            <span class="continue-cta">이어하기 →</span>
+            <button type="button" class="mini-reset-link" data-creset="${s.id}" title="처음부터 다시 시작">🔄 처음부터</button>
+            <button type="button" class="mini-del-link" data-cdel="${s.id}" title="기록 삭제">✕</button>
           </div>
         </div>
-      </button>`
+      </div>`
     )
     .join('');
 
-  strip.querySelectorAll('[data-csid]').forEach((btn) => {
-    btn.addEventListener('click', () => openSession(btn.dataset.csid));
+  strip.querySelectorAll('[data-csid]').forEach((card) => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('[data-cdel]') || e.target.closest('[data-creset]')) return;
+      openSession(card.dataset.csid);
+    });
+  });
+  strip.querySelectorAll('[data-creset]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleResetSession(btn.dataset.creset, true);
+    });
+  });
+  strip.querySelectorAll('[data-cdel]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleDeleteSessionById(btn.dataset.cdel);
+    });
   });
 }
 
@@ -1392,7 +1406,8 @@ function openCharDetailModal(charId) {
         ${
           latestSession
             ? `<button class="primary-btn" id="detailResumeBtn">💬 이전 이야기 이어하기 (${latestSession.messageCount}턴)</button>
-               <button class="secondary-btn" id="detailNewBtn">+ 새 회차 시작</button>`
+               <button class="secondary-btn" id="detailResetBtn">🔄 처음부터 다시 시작</button>
+               <button class="ghost-btn" id="detailNewBtn">+ 새 회차 추가</button>`
             : `<button class="primary-btn" id="detailNewBtn">✦ 지금 이야기 시작하기</button>`
         }
         <button class="ghost-btn" id="detailLikeBtn">${c.isLiked ? '❤️' : '🤍'} 좋아요 ${formatKoreanCount(c.likes)}</button>
@@ -1406,6 +1421,10 @@ function openCharDetailModal(charId) {
     $('#detailResumeBtn').addEventListener('click', () => {
       closeModal('charDetailModal');
       openSession(latestSession.id);
+    });
+    $('#detailResetBtn')?.addEventListener('click', () => {
+      closeModal('charDetailModal');
+      handleResetSession(latestSession.id, true);
     });
   }
   $('#detailNewBtn').addEventListener('click', () => {
@@ -1471,6 +1490,9 @@ function renderSidebarSessions() {
   badge.hidden = state.sessions.length === 0;
   badge.textContent = String(state.sessions.length);
 
+  const clearBtn = $('#clearAllSessionsSidebarBtn');
+  if (clearBtn) clearBtn.hidden = state.sessions.length === 0;
+
   const container = $('#sidebarSessions');
   if (!state.sessions.length) {
     container.innerHTML = '<div class="sidebar-empty">아직 시작한 이야기가 없어요</div>';
@@ -1480,22 +1502,35 @@ function renderSidebarSessions() {
     .slice(0, 12)
     .map(
       (s) => `
-    <button class="sidebar-session-item ${state.activeSession?.id === s.id ? 'active' : ''}" data-sid="${s.id}">
+    <div class="sidebar-session-item ${state.activeSession?.id === s.id ? 'active' : ''}" data-sid="${s.id}" role="button" tabindex="0">
       <img src="${escapeHtml(s.characterAvatar)}" alt="" />
       <div class="sidebar-session-meta">
         <div class="sidebar-session-name">${escapeHtml(s.characterName)}</div>
         <div class="sidebar-session-preview">${escapeHtml(s.lastPreview || s.mood)}</div>
       </div>
-    </button>`
+      <button type="button" class="sidebar-session-del" data-sdel="${s.id}" title="대화 삭제">✕</button>
+    </div>`
     )
     .join('');
 
-  container.querySelectorAll('[data-sid]').forEach((btn) => {
-    btn.addEventListener('click', () => openSession(btn.dataset.sid));
+  container.querySelectorAll('[data-sid]').forEach((item) => {
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sdel]')) return;
+      openSession(item.dataset.sid);
+    });
+  });
+  container.querySelectorAll('[data-sdel]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleDeleteSessionById(btn.dataset.sdel);
+    });
   });
 }
 
 function renderChatsView() {
+  const clearAllBtn = $('#clearAllChatsBtn');
+  if (clearAllBtn) clearAllBtn.hidden = state.sessions.length === 0;
+
   const grid = $('#sessionsListGrid');
   if (!state.sessions.length) {
     grid.innerHTML = `<div class="empty-state"><strong>아직 진행 중인 이야기가 없어요</strong>홈에서 마음에 드는 캐릭터를 골라 첫 이야기를 시작해 보세요!</div>`;
@@ -1514,9 +1549,13 @@ function renderChatsView() {
         <div style="font-size:12px;color:#c4b5fd;font-weight:600;">${escapeHtml(s.characterTitle)}</div>
         <div class="session-card-preview">${escapeHtml(s.lastPreview)}</div>
         <div class="session-card-meta">
-          <span>♥ 호감도 ${s.affinity}</span>
+          <span>♥ ${s.affinity}</span>
           <span>💬 ${s.messageCount}턴</span>
           <span>${formatRelativeTime(s.updatedAt)}</span>
+          <div class="session-card-actions">
+            <button type="button" class="tiny-ghost-btn" data-card-reset="${s.id}" title="처음부터 다시 시작">🔄 처음부터</button>
+            <button type="button" class="tiny-ghost-btn danger-del" data-card-del="${s.id}" title="채팅 삭제">🗑️ 삭제</button>
+          </div>
         </div>
       </div>
     </div>`
@@ -1524,8 +1563,81 @@ function renderChatsView() {
     .join('');
 
   grid.querySelectorAll('.session-card').forEach((card) => {
-    card.addEventListener('click', () => openSession(card.dataset.sid));
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('[data-card-reset]') || e.target.closest('[data-card-del]')) return;
+      openSession(card.dataset.sid);
+    });
   });
+  grid.querySelectorAll('[data-card-reset]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleResetSession(btn.dataset.cardReset, true);
+    });
+  });
+  grid.querySelectorAll('[data-card-del]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleDeleteSessionById(btn.dataset.cardDel);
+    });
+  });
+}
+
+async function handleResetSession(sessionId, openAfter = false) {
+  if (!sessionId) return;
+  if (!confirm('이 이야기의 대화 내용·호감도·요약 메모리를 초기화하고 첫 장면부터 다시 시작할까요?')) return;
+  if (state.isStreaming && state.abortController) state.abortController.abort();
+  stopSpeech();
+  try {
+    const res = await api.resetSession(sessionId);
+    await reloadSessions();
+    if (openAfter || state.activeSession?.id === sessionId) {
+      enterChatRoom(res.session, res.character, res.persona);
+    }
+    showToast('🔄 이야기를 첫 장면부터 초기화했습니다!');
+  } catch (err) {
+    showToast(humanizeError(err), 'error');
+  }
+}
+
+async function handleDeleteSessionById(sessionId, navigateToChats = false) {
+  if (!sessionId) return;
+  if (!confirm('이 채팅 기록을 완전히 삭제할까요?')) return;
+  const deletingActive = state.activeSession?.id === sessionId;
+  if (deletingActive && state.isStreaming && state.abortController) {
+    state.abortController.abort();
+  }
+  if (deletingActive) stopSpeech();
+  try {
+    await api.deleteSession(sessionId);
+    if (deletingActive) {
+      state.activeSession = null;
+      state.activeCharacter = null;
+    }
+    await reloadSessions();
+    if (navigateToChats || (deletingActive && state.view === 'chat')) {
+      switchView('chats');
+    }
+    showToast('🗑️ 채팅 기록이 삭제되었습니다.');
+  } catch (err) {
+    showToast(humanizeError(err), 'error');
+  }
+}
+
+async function handleClearAllSessions() {
+  if (!state.sessions.length) return;
+  if (!confirm(`진행 중인 최근 이야기 ${state.sessions.length}개를 모두 삭제하고 초기화할까요?\n(내가 만든 캐릭터와 API 키는 유지됩니다.)`)) return;
+  if (state.isStreaming && state.abortController) state.abortController.abort();
+  stopSpeech();
+  try {
+    await api.clearAllSessions();
+    state.activeSession = null;
+    state.activeCharacter = null;
+    await reloadSessions();
+    if (state.view === 'chat') switchView('home');
+    showToast('🗑️ 모든 최근 이야기 기록이 초기화되었습니다.');
+  } catch (err) {
+    showToast(humanizeError(err), 'error');
+  }
 }
 
 async function openOrStartCharacter(characterId) {

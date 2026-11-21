@@ -432,6 +432,59 @@ export function deleteSession(sessionId) {
   return true;
 }
 
+export function clearAllSessions() {
+  writeSessions([]);
+  return true;
+}
+
+export function resetSession(sessionId) {
+  const sessions = readSessions();
+  const idx = sessions.findIndex((s) => s.id === sessionId);
+  if (idx === -1) return null;
+  const curr = sessions[idx];
+  const char = getCharacter(curr.characterId);
+  if (!char) return null;
+  const persona = getPersona(curr.personaId);
+  const now = new Date().toISOString();
+
+  const opening = renderTemplate(
+    char.openingMessage || `*${char.name}이(가) 천천히 고개를 들어 {{user}}를 바라보았다.*\n\n"안녕, {{user}}. 기다리고 있었어."`,
+    { userName: persona.name, charName: char.name }
+  );
+
+  const reset = {
+    ...curr,
+    nationState: char.initialNationState ? structuredClone(char.initialNationState) : null,
+    summaryMemory: '',
+    affinity: char.initialAffinity ?? 35,
+    mood: char.initialMood || '호기심 어린 시선',
+    relationshipStage: char.relationshipStage || '첫 만남',
+    suggestedReplies: (char.suggestedReplies || []).map((r) =>
+      renderTemplate(r, { userName: persona.name, charName: char.name })
+    ),
+    messages: [
+      {
+        id: makeId('msg'),
+        role: 'model',
+        content: opening,
+        versions: [opening],
+        activeVersion: 0,
+        isOpening: true,
+        createdAt: now,
+        meta: {
+          model: 'opening',
+          triggeredLorebooks: [],
+        },
+      },
+    ],
+    updatedAt: now,
+  };
+
+  sessions[idx] = reset;
+  writeSessions(sessions);
+  return reset;
+}
+
 // --- Image Upload ---
 export function saveUploadedImage(dataUrl) {
   ensureDataDirs();

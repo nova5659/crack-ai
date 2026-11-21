@@ -1124,6 +1124,46 @@ export const cloudBackend = {
     return { deleted: true };
   },
 
+  async clearAllSessions() {
+    saveSessionsRaw([]);
+    return { cleared: true, sessions: [] };
+  },
+
+  async resetSession(id) {
+    const sessions = getSessionsRaw();
+    const idx = sessions.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error('세션을 찾을 수 없습니다.');
+    const curr = sessions[idx];
+    const chars = await listCharactersCloud();
+    const char = chars.find((c) => c.id === curr.characterId);
+    if (!char) throw new Error('캐릭터를 찾을 수 없습니다.');
+    const personas = listPersonasLocal();
+    const persona = personas.find((p) => p.id === curr.personaId) || personas[0];
+    const now = new Date().toISOString();
+    const opening = renderTemplate(
+      char.openingMessage || `*${char.name}이(가) {{user}}를 바라보았다.*`,
+      { userName: persona.name, charName: char.name }
+    );
+    const reset = {
+      ...curr,
+      nationState: char.initialNationState ? structuredClone(char.initialNationState) : null,
+      summaryMemory: '',
+      affinity: char.initialAffinity ?? 35,
+      mood: char.initialMood || '호기심 어린 시선',
+      relationshipStage: char.relationshipStage || '첫 만남',
+      suggestedReplies: (char.suggestedReplies || []).map((r) =>
+        renderTemplate(r, { userName: persona.name, charName: char.name })
+      ),
+      messages: [
+        { id: makeId('msg'), role: 'model', content: opening, versions: [opening], activeVersion: 0, isOpening: true, createdAt: now, meta: { model: 'opening', triggeredLorebooks: [] } },
+      ],
+      updatedAt: now,
+    };
+    sessions[idx] = reset;
+    saveSessionsRaw(sessions);
+    return { session: reset, character: char, persona };
+  },
+
   async updateMessage(sessionId, msgId, patch) {
     const { session } = await this.getSession(sessionId);
     const msgs = session.messages.map((m) => {

@@ -190,6 +190,16 @@ export const api = {
       () => request(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
       () => cloudBackend.deleteSession(id)
     ),
+  resetSession: (id) =>
+    dispatch(
+      () => request(`/api/sessions/${encodeURIComponent(id)}/reset`, { method: 'POST' }),
+      () => cloudBackend.resetSession(id)
+    ),
+  clearAllSessions: () =>
+    dispatch(
+      () => request('/api/sessions', { method: 'DELETE' }),
+      () => cloudBackend.clearAllSessions()
+    ),
 
   updateMessage: (sessionId, msgId, patch) =>
     dispatch(

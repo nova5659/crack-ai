@@ -228,6 +228,19 @@ test('HTTP server API & SSE streaming end-to-end flow', async (t) => {
     triggeredLorebooks: [],
   });
   assert.ok(sysPrompt.includes('절대 반말 사용'));
+
+  // 7. Reset session back to opening turn & Clear all sessions
+  const resetRes = await fetch(`${base}/api/sessions/${sessRes.session.id}/reset`, {
+    method: 'POST',
+  }).then((r) => r.json());
+  assert.equal(resetRes.session.messages.length, 1);
+  assert.equal(resetRes.session.messages[0].isOpening, true);
+  assert.equal(resetRes.session.affinity, 35);
+
+  const clearRes = await fetch(`${base}/api/sessions`, { method: 'DELETE' }).then((r) => r.json());
+  assert.equal(clearRes.cleared, true);
+  const afterClear = await fetch(`${base}/api/sessions`).then((r) => r.json());
+  assert.equal(afterClear.sessions.length, 0);
 });
 
 test('Netlify Cloud Function handler responds to health and enforces API key checks', async () => {

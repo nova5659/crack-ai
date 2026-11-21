@@ -12,6 +12,7 @@ import {
 } from './config.mjs';
 import { ANIME_CATEGORIES, GENRES, renderTemplate } from './presets.mjs';
 import {
+  clearAllSessions,
   createSession,
   deleteCharacter,
   deletePersona,
@@ -23,6 +24,7 @@ import {
   listPersonas,
   listSessions,
   makeId,
+  resetSession,
   resolveUploadFile,
   saveCharacter,
   savePersona,
@@ -837,6 +839,10 @@ export function createAppServer({ port = getPort() } = {}) {
         const charId = urlObj.searchParams.get('characterId');
         return sendJson(res, 200, { sessions: listSessions(charId) });
       }
+      if (pathname === '/api/sessions' && method === 'DELETE') {
+        clearAllSessions();
+        return sendJson(res, 200, { cleared: true, sessions: [] });
+      }
       if (pathname === '/api/sessions' && method === 'POST') {
         const body = await readJsonBody(req);
         const cfg = readConfig();
@@ -847,6 +853,15 @@ export function createAppServer({ port = getPort() } = {}) {
         });
         const character = getCharacter(session.characterId);
         return sendJson(res, 201, { session, character });
+      }
+
+      const sessReset = pathname.match(/^\/api\/sessions\/([^/]+)\/reset$/);
+      if (sessReset && method === 'POST') {
+        const reset = resetSession(sessReset[1]);
+        if (!reset) return sendError(res, 404, '세션을 찾을 수 없습니다.');
+        const character = getCharacter(reset.characterId);
+        const persona = getPersona(reset.personaId);
+        return sendJson(res, 200, { session: reset, character, persona });
       }
 
       const sessStream = pathname.match(/^\/api\/sessions\/([^/]+)\/chat\/stream$/);

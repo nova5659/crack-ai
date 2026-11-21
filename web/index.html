@@ -62,7 +62,10 @@
       </nav>
 
       <div class="sidebar-recent">
-        <div class="sidebar-section-title">최근 이야기</div>
+        <div class="sidebar-section-head">
+          <div class="sidebar-section-title">최근 이야기</div>
+          <button type="button" class="sidebar-clear-btn" id="clearAllSessionsSidebarBtn" hidden title="최근 이야기 전체 삭제">전체 삭제</button>
+        </div>
         <div class="sidebar-sessions" id="sidebarSessions">
           <div class="sidebar-empty">아직 시작한 이야기가 없어요</div>
         </div>
@@ -245,9 +248,12 @@
           <div class="view-page-header">
             <div>
               <h1>💬 내 채팅 목록</h1>
-              <p>진행 중인 모든 이야기를 이어서 읽거나 새 회차를 시작할 수 있어요.</p>
+              <p>진행 중인 이야기를 이어서 보거나, 처음부터 초기화·삭제할 수 있어요.</p>
             </div>
-            <button class="primary-btn" id="chatsExploreBtn">새 이야기 찾기</button>
+            <div class="header-btn-group">
+              <button class="danger-btn" id="clearAllChatsBtn" hidden>🗑️ 전체 기록 삭제</button>
+              <button class="primary-btn" id="chatsExploreBtn">새 이야기 찾기</button>
+            </div>
           </div>
           <div class="sessions-list-grid" id="sessionsListGrid"></div>
         </section>
@@ -482,6 +488,10 @@
                 <option value="speed">💨 초고속</option>
               </select>
 
+              <button type="button" class="pill-btn chat-reset-btn" id="chatResetBtn" title="처음부터 다시 시작 (대화 초기화)">
+                <span>🔄</span><span class="btn-label">처음부터</span>
+              </button>
+
               <button class="pill-btn inspector-toggle-btn" id="toggleInspectorBtn" title="유저노트 · 메모리 · 로어북">
                 <span>⚙️</span><span class="btn-label">설정</span>
               </button>
@@ -695,6 +705,7 @@
                   </div>
                   <div class="insp-block">
                     <label class="insp-label">보관 및 관리</label>
+                    <button class="secondary-btn full" id="resetCurrentSessionBtn">🔄 처음부터 다시 시작 (초기화)</button>
                     <button class="secondary-btn full" id="exportStoryBtn">📖 웹소설(.md) 파일로 저장</button>
                     <button class="ghost-btn full" id="editCurrentCharBtn">✏️ 캐릭터 설정 수정</button>
                     <button class="danger-btn full" id="deleteCurrentSessionBtn">🗑️ 현재 채팅방 삭제</button>
