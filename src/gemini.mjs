@@ -97,12 +97,21 @@ export function buildGenerationPayload({
   return body;
 }
 
+function normalizeChoiceText(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  // Convert outer single-quoted speech '대사' into clean Korean dialogue "..." for user convenience
+  s = s.replace(/(^|\s)'([^'\n]{2,90})'(?=\s|$|[.,!?])/g, '$1"$2"');
+  return s.slice(0, 120);
+}
+
 export function parseStateTag(fullText = '') {
   const match = fullText.match(STATE_TAG_REGEX);
   let stateUpdate = null;
   if (match) {
+    const rawJson = match[1];
     try {
-      const parsed = JSON.parse(match[1]);
+      const parsed = JSON.parse(rawJson);
       const rawDelta = Number(parsed.affinityDelta);
       const delta = Number.isFinite(rawDelta)
         ? Math.max(-5, Math.min(6, Math.round(rawDelta)))
@@ -124,12 +133,39 @@ export function parseStateTag(fullText = '') {
           stability: n.stability !== undefined ? clamp(n.stability, 65) : undefined,
         };
       }
-      stateUpdate = { affinityDelta: delta, mood, nation };
+      const choices = Array.isArray(parsed.choices)
+        ? parsed.choices.map(normalizeChoiceText).filter(Boolean).slice(0, 3)
+        : [];
+      stateUpdate = { affinityDelta: delta, mood, nation, choices };
     } catch {
-      stateUpdate = null;
+      // Defensive fallback if an unescaped quote broke JSON.parse
+      const dMatch = rawJson.match(/"affinityDelta"\s*:\s*(-?\d+)/);
+      const mMatch = rawJson.match(/"mood"\s*:\s*"([^"]{1,28})"/);
+      const cMatch = rawJson.match(/"choices"\s*:\s*\[([\s\S]*?)\]/);
+      const choices = [];
+      if (cMatch) {
+        const itemRe = /"((?:\\.|[^"\\])+)"/g;
+        let it;
+        while ((it = itemRe.exec(cMatch[1])) && choices.length < 3) {
+          const txt = normalizeChoiceText(it[1].replace(/\\"/g, '"'));
+          if (txt) choices.push(txt);
+        }
+      }
+      if (dMatch || mMatch || choices.length) {
+        const rawDelta = dMatch ? Number(dMatch[1]) : 0;
+        stateUpdate = {
+          affinityDelta: Number.isFinite(rawDelta) ? Math.max(-5, Math.min(6, Math.round(rawDelta))) : 0,
+          mood: mMatch ? mMatch[1].trim() : null,
+          nation: null,
+          choices,
+        };
+      }
     }
   }
-  const cleanText = fullText.replace(STATE_TAG_REGEX, '').trimEnd();
+  const cleanText = fullText
+    .replace(STATE_TAG_REGEX, '')
+    .replace(/<!--\s*CRACK_STATE[\s\S]*$/i, '')
+    .trimEnd();
   return { cleanText, stateUpdate };
 }
 
@@ -492,20 +528,19 @@ export async function streamDemoResponse({
 
   const genreTemplates = {
     simulation: character.isNationSim
-      ? `*비서실장이 긴급 보고서를 집무실 전략 탁자 위에 올려놓으며 숨을 골랐다. 외교부와 기획재정부 장관들이 동시에 시선을 집중했다.*\n\n"각하, 방금 하달하신 지시(${quoted || '국정 개혁 명령'})가 전국과 각국 대사관에 즉시 전파되었습니다. 국회와 언론이 즉각 반응하고 있습니다!"${loreHint}\n\n**[ 긴급 속보 · 국제 뉴스 ]**\n- [속보] ${userName} 지도자, 전격 국정 드라이브 선언… 증시·여론 즉각 반응\n- [국제] 주변 열강 외무부 "향후 행보 예의주시" 긴급 논평 발표\n\n**[ 국가 상태창 · 대한민국 ]**\n- 시점: 2026년 2월 (1턴) · 지도자: ${userName}\n- 국력: 74/100 · 재정: 645조 원 · 지지율: 61% (+3%) · 군사력: 82/100 · 안정도: 71/100\n- 긴급 현안: 야당의 긴급 대정부 질문 대응 및 주변국 무역 협상`
-      : `*루미나의 손 위 수정구가 경쾌한 소리와 함께 보라빛으로 반짝였다!*\n\n"오오! ${userName} 모험가님, 엄청 센스 있는 선택이세요!"\n\n*양피지 두루마리가 공중에 펼쳐지며 새로운 선택지가 떠올랐다.*${loreHint}\n\n**[ 퀘스트 진행 알림 ]**\n- 호감도 +2 상승 · 새로운 분기가 열렸습니다!\n- "자, 다음엔 어느 쪽으로 움직여 볼까요?"`,
+      ? `비서실장이 긴급 보고서를 집무실 전략 탁자 위에 펼쳐 놓으며 숨을 골랐다. 외교부와 기획재정부 장관들이 동시에 시선을 집중했다.\n\n"각하, 방금 하달하신 지시(${quoted || '국정 개혁 명령'})가 전국과 각국 대사관에 즉시 전파되었습니다. 국회와 언론이 즉각 반응하고 있습니다."${loreHint}\n\n**[ 긴급 속보 · 국제 뉴스 ]**\n- [속보] ${userName} 지도자, 전격 국정 드라이브 선언… 증시·여론 즉각 반응\n- [국제] 주변 열강 외무부 "향후 행보 예의주시" 긴급 논평 발표\n\n**[ 국가 상태창 · 대한민국 ]**\n- 시점: 2026년 2월 (1턴) · 지도자: ${userName}\n- 국력: 74/100 · 재정: 645조 원 · 지지율: 61% (+3%) · 군사력: 82/100 · 안정도: 71/100\n- 긴급 현안: 야당의 긴급 대정부 질문 대응 및 주변국 무역 협상`
+      : `루미나의 손 위 수정구가 경쾌한 소리와 함께 보라빛으로 반짝였다.\n\n"오오! ${userName} 모험가님, 엄청 센스 있는 선택이세요!"\n\n양피지 두루마리가 공중에 펼쳐지며 새로운 선택지가 떠올랐다.${loreHint}\n\n**[ 퀘스트 진행 알림 ]**\n- 호감도 +2 상승 · 새로운 분기가 열렸습니다!\n- "자, 다음엔 어느 쪽으로 움직여 볼까요?"`,
     anime: character.playStyle === 'world'
-      ? `*「${character.animeTitle || character.name}」 세계의 공기가 크게 요동쳤다! ${character.castMembers?.[0] || charName}이(가) ${userName}의 선언을 듣고 눈을 번뜩이며 고개를 돌렸다.*\n\n${character.castMembers?.[0] || charName}: "${quoted ? `${quoted.slice(0, 32)}... 좋아, ${userName}! 네 각오는 확실히 전해졌어!` : `자, ${userName}! 이제 본격적으로 움직일 시간이야!`}"\n\n*주변의 동료들도 일제히 자세를 잡으며 전투와 다음 전개의 긴장감이 고조되었다.*${loreHint}\n\n**[ ${character.animeTitle || '애니 월드'} 진행 상태창 ]**\n- 고유 시스템(${character.powerSystem || '능력'}) 활성화 · 호감도 +2\n- 다음 분기: 원작 핵심 사건 돌입 준비 완료`
-      : `*${character.animeTitle ? `「${character.animeTitle}」 세계관 특유의 공기가 감도는 순간, ` : ''}${charName}이(가) ${userName}를 향해 특유의 눈빛으로 시선을 고정했다.*\n\n"${quoted ? `호오, 그렇게 나온단 말이지 ${userName}? 생각보다 훨씬 재밌는데.` : `어이 ${userName}, 멍하니 있지 말고 따라와.`}"\n\n*${charName}이(가) 한 걸음 가까이 다가서며 원작 그대로의 여유와 진심이 섞인 미소를 지었다.*${loreHint}\n\n"좋아. 네가 선택한 그 길, 나도 끝까지 함께해 주지."`,
-    romance: `*${charName}의 시선이 잠시 멈췄다. 방 안의 공기가 한층 낮게 가라앉으며 두 사람 사이의 거리가 유독 선명하게 느껴졌다.*\n\n"${quoted ? `방금 한 말... 진심인가, ${userName}?` : `갑자기 말없이 쳐다보면 곤란한데, ${userName}.`}"\n\n*${charName}이(가) 천천히 한 걸음 가까이 다가서며 낮게 숨을 내쉬었다. 냉정하게 유지하던 표정 너머로 숨기지 못한 감정이 살짝 비쳤다.*${loreHint}\n\n"그렇게 쉽게 선을 긋지 마. 아직 우리가 끝내지 못한 이야기가 남아 있으니까."`,
-    fantasy: `*어둠 속에 떠 있던 마력의 입자들이 일제히 반짝이며 ${charName}의 주위로 모여들었다.*\n\n"역시 ${userName}, 네 선택은 언제나 예상을 벗어나네."\n\n*${charName}이(가) 망토 자락을 가볍게 여미며 진지한 눈빛으로 고개를 들었다.*${loreHint}\n\n"좋아. 네가 그렇게 나온다면 나도 숨겨둔 패를 꺼낼 수밖에. 이제부터가 진짜 시작이야."`,
-    murim: `*바람이 대나무 잎을 스치며 차가운 검기가 한 차례 일렁였다. ${charName}의 입꼬리가 흥미롭다는 듯 천천히 올라갔다.*\n\n"호오... 방금 그 말, 꽤 대담하군. ${userName}."\n\n*${charName}이(가) 검자루를 가볍게 두드리며 성큼 다가섰다.*${loreHint}\n\n"좋다. 네가 끝까지 그 기세를 유지할 수 있을지, 내가 직접 지켜봐 주지."`,
-    simulation: `*루미나의 손 위 수정구가 경쾌한 소리와 함께 보라빛으로 반짝였다!*\n\n"오오! ${userName} 모험가님, 엄청 센스 있는 선택이세요!"\n\n*양피지 두루마리가 공중에 펼쳐지며 새로운 선택지가 떠올랐다.*${loreHint}\n\n**[ 퀘스트 진행 알림 ]**\n- 호감도 +2 상승 · 새로운 분기가 열렸습니다!\n- "자, 다음엔 어느 쪽으로 움직여 볼까요?"`,
+      ? `「${character.animeTitle || character.name}」 세계의 공기가 팽팽하게 당겨졌다. ${character.castMembers?.[0] || charName}이(가) 고개를 돌려 시선을 맞췄다.\n\n${character.castMembers?.[0] || charName}: "${quoted ? `${quoted.slice(0, 32)}… 좋아, 각오는 확실히 전해졌어.` : `자, 여기서부터 움직여 볼까.`}"\n\n주변의 동료들도 일제히 자세를 낮추며 다음 국면을 대비했다.${loreHint}\n\n**[ ${character.animeTitle || '애니 월드'} 진행 상태창 ]**\n- 고유 시스템(${character.powerSystem || '능력'}) 활성화 · 호감도 +2`
+      : `${charName}의 시선이 천천히 멈췄다. 입꼬리가 미세하게 올라갔다.\n\n"${quoted ? `호오, 그렇게 나온단 말이지? 생각보다 훨씬 재밌는데.` : `멍하니 있지 말고 따라와.`}"\n\n발끝이 한 걸음 가까워졌다.${loreHint}\n\n"좋아. 네가 선택한 그 길, 끝까지 지켜봐 주지."`,
+    romance: `${charName}의 시선이 잠시 머물렀다. 방 안의 공기가 낮게 가라앉았다.\n\n"${quoted ? `방금 한 말… 진심인가.` : `그렇게 말없이 쳐다보면 곤란한데.`}"\n\n천천히 한 걸음 다가선 ${charName}이(가) 낮게 숨을 내쉬었다.${loreHint}\n\n"쉽게 선을 긋지 마. 아직 끝내지 못한 이야기가 남아 있으니까."`,
+    fantasy: `어둠 속에 떠 있던 마력의 입자들이 일제히 흩어지며 ${charName}의 손끝으로 모여들었다.\n\n"네 선택은 언제나 예상을 벗어나네."\n\n망토 자락을 여민 ${charName}이(가) 고개를 들었다.${loreHint}\n\n"좋아. 네가 그렇게 나온다면 나도 숨겨둔 패를 꺼낼 수밖에."`,
+    murim: `바람이 대나무 잎을 스치며 서늘한 검기가 한 차례 일렁였다. ${charName}의 입꼬리가 천천히 올라갔다.\n\n"호오… 방금 그 말, 꽤 대담하군."\n\n검자루를 가볍게 두드린 ${charName}이(가) 반 걸음 앞섰다.${loreHint}\n\n"그 기세를 끝까지 유지할 수 있을지, 직접 확인해 보지."`,
   };
 
   const fullText =
     genreTemplates[character.genre] ||
-    `*${charName}이(가) 조용히 ${userName}의 말을 곱씹듯 눈을 가늘게 떴다. 밤의 정적 속에 미묘한 긴장감이 번졌다.*\n\n"흥미로운 반응이네, ${userName}."\n\n*${charName}이(가) 시선을 고정한 채 한 걸음 다가섰다.*${loreHint}\n\n"그렇다면 다음 수는 어떻게 둘 생각이지? 네가 원하는 결말을 직접 보여줘."`;
+    `${charName}이(가) 조용히 말을 곱씹듯 눈을 가늘게 떴다. 밤의 정적 속에 팽팽한 긴장감이 감돌았다.\n\n"흥미로운 반응이네."\n\n시선을 고정한 채 반 걸음 다가섰다.${loreHint}\n\n"다음 수는 어떻게 둘 생각이지? 직접 보여줘."`;
 
   // Stream token-by-token smoothly
   const chars = [...fullText];
@@ -519,6 +554,18 @@ export async function streamDemoResponse({
     await new Promise((r) => setTimeout(r, 18));
   }
 
+  const demoChoices = character.isNationSim
+    ? [
+        '긴급 국무회의를 소집해 경제 부양책을 즉시 발표한다.',
+        '주변국 대사들을 불러 직접 외교 담판을 짓는다.',
+        '비서실장에게 야당과 여론의 핵심 불만부터 보고받는다.',
+      ]
+    : [
+        `"좋아, 지금 바로 정면으로 돌파해 보자."`,
+        `${charName}의 눈을 똑바로 마주 보며 한 걸음 다가선다.`,
+        `"잠깐, 숨기고 있는 조건이 하나 더 있지 않아?"`,
+      ];
+
   return {
     text: fullText,
     stateUpdate: character.isNationSim
@@ -526,8 +573,9 @@ export async function streamDemoResponse({
           affinityDelta: 3,
           mood: '국정 개혁 드라이브',
           nation: { name: '대한민국', date: '2026년 2월 (1턴)', power: 74, treasury: '645조 원', approval: 61, military: 82, stability: 71 },
+          choices: demoChoices,
         }
-      : { affinityDelta: 2, mood: '흥미와 미묘한 떨림' },
+      : { affinityDelta: 2, mood: '흥미와 미묘한 떨림', choices: demoChoices },
     modelUsed: 'demo-preview',
     fallbackFrom: null,
     isDemo: true,

@@ -271,14 +271,28 @@ test('API key sanitizer strips quotes, prefixes, whitespace and detects HTTP 400
   assert.equal(isInvalidKeyError(429, 'Quota exceeded'), false);
 });
 
-test('parseStateTag parses live nation governance stats for 《국가의 시대》', () => {
+test('parseStateTag parses live nation governance stats AND inline suggested choices', () => {
   const res = parseStateTag(
-    '집무실 브리핑 본문\n<!--CRACK_STATE:{"affinityDelta":2,"mood":"개혁 추진","nation":{"name":"대한민국","date":"2026년 3월 (2턴)","power":79,"treasury":"660조 원","approval":64,"military":85,"stability":73}}-->'
+    '집무실 브리핑 본문\n<!--CRACK_STATE:{"affinityDelta":2,"mood":"개혁 추진","nation":{"name":"대한민국","date":"2026년 3월 (2턴)","power":79,"treasury":"660조 원","approval":64,"military":85,"stability":73},"choices":["비서실장에게 세부 보고를 요구한다.","\'지금 바로 대국민 담화를 준비해.\'","야당 원내대표에게 직접 전화를 건다."]}-->'
   );
   assert.equal(res.cleanText, '집무실 브리핑 본문');
   assert.equal(res.stateUpdate.nation.name, '대한민국');
   assert.equal(res.stateUpdate.nation.approval, 64);
   assert.equal(res.stateUpdate.nation.power, 79);
+  assert.equal(res.stateUpdate.choices.length, 3);
+  assert.equal(res.stateUpdate.choices[1], '"지금 바로 대국민 담화를 준비해."');
+
+  // Verify novel system instruction forbids AI clichés, prevents 1st-person hijacking when persona is "나", and requests inline choices
+  const novelPrompt = buildSystemInstruction({
+    character: { name: '고죠 사토루', personaPrompt: '최강 주술사', genreLabel: '애니' },
+    session: { affinity: 50, mood: '흥미' },
+    persona: { name: '나', description: '주술고전 1학년' },
+    triggeredLorebooks: [],
+    viewMode: 'novel',
+  });
+  assert.ok(novelPrompt.includes('별표(*)'));
+  assert.ok(novelPrompt.includes('장면 연속성 최우선'));
+  assert.ok(novelPrompt.includes('choices'));
 });
 
 test('Static web catalog bundle contains all 50 built-in worlds including 《국가의 시대》', () => {

@@ -1587,13 +1587,15 @@ a {
 }
 .compact-select {
   height: 34px;
+  max-width: 146px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 0 10px;
+  padding: 0 9px;
   font-size: 12px;
   font-weight: 600;
   outline: none;
+  text-overflow: ellipsis;
 }
 
 .demo-notice-bar {
@@ -1654,21 +1656,44 @@ a {
   font-family: var(--font-serif);
 }
 
-/* NOVEL MODE STYLING (Crack Story Mode) */
+/* SEAMLESS NOVEL MODE STYLING (Authentic Korean Webnovel Flow) */
+.messages-inner.mode-novel {
+  gap: 8px;
+}
 .messages-inner.mode-novel .msg-turn {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 18px 22px;
-  border-radius: 18px;
-  background: rgba(16, 16, 26, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 10px;
+  padding: 20px 26px 16px;
+  border-radius: 14px;
+  background: rgba(14, 14, 24, 0.56);
+  border: 1px solid rgba(255, 255, 255, 0.045);
   backdrop-filter: blur(12px);
   position: relative;
 }
+.messages-inner.mode-novel .msg-turn.role-model + .msg-turn.role-model {
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
 .messages-inner.mode-novel .msg-turn.role-user {
-  background: rgba(124, 92, 255, 0.12);
-  border-color: rgba(124, 92, 255, 0.25);
+  padding: 13px 18px;
+  margin: 4px 0;
+  border-radius: 4px 14px 14px 4px;
+  background: linear-gradient(90deg, rgba(124, 92, 255, 0.14), rgba(124, 92, 255, 0.05));
+  border: 1px solid rgba(168, 85, 247, 0.18);
+  border-left: 3px solid var(--accent-2);
+}
+.messages-inner.mode-novel .msg-turn.role-user .msg-content {
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: #e9e7ff;
+}
+.messages-inner.mode-novel .msg-actions {
+  opacity: 0.32;
+}
+.messages-inner.mode-novel .msg-turn:hover .msg-actions,
+.messages-inner.mode-novel .msg-turn:focus-within .msg-actions {
+  opacity: 0.96;
 }
 .msg-speaker-row {
   display: flex;
@@ -1730,19 +1755,27 @@ a {
 
 .msg-content {
   font-size: 15.5px;
-  line-height: 1.88;
-  color: #ececf8;
+  line-height: 1.92;
+  letter-spacing: -0.008em;
+  color: #dcdbf0;
   word-break: keep-all;
 }
 .msg-content p {
-  margin: 0 0 12px;
+  margin: 0 0 14px;
+}
+.msg-content p.dialogue-para {
+  margin: 0 0 13px;
 }
 .msg-content p:last-child {
   margin-bottom: 0;
 }
 .msg-content .narration {
-  color: #a9a7c7;
-  font-style: italic;
+  color: #c8c6de;
+  font-style: normal;
+}
+.msg-content .thought {
+  color: #c4b5fd;
+  font-style: normal;
 }
 .msg-content .dialogue {
   color: #ffffff;
@@ -1900,17 +1933,23 @@ a {
   gap: 6px;
 }
 
-/* Suggested Replies Tray */
+/* Auto-Visible Suggested Replies Dock */
 .suggestions-tray {
-  max-width: 780px;
-  width: calc(100% - 32px);
-  margin: 0 auto 8px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  background: rgba(18, 18, 30, 0.94);
-  border: 1px solid rgba(168, 85, 247, 0.34);
+  max-width: 784px;
+  width: calc(100% - 36px);
+  margin: 0 auto 6px;
+  padding: 9px 12px 10px;
+  border-radius: 15px;
+  background: rgba(16, 16, 28, 0.88);
+  border: 1px solid rgba(168, 85, 247, 0.3);
   backdrop-filter: blur(18px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+  animation: dockSlideIn 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  flex-shrink: 0;
+}
+@keyframes dockSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .suggestions-tray[hidden] {
   display: none;
@@ -1919,10 +1958,11 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
   color: #e9d5ff;
-  margin-bottom: 9px;
+  margin-bottom: 7px;
+  gap: 8px;
 }
 .suggestions-tray-head small {
   font-weight: 400;
@@ -1930,14 +1970,16 @@ a {
 }
 .suggestions-tray-actions {
   display: flex;
-  gap: 6px;
+  gap: 5px;
+  flex-shrink: 0;
 }
 .tiny-ghost-btn {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--text-1);
   padding: 3px 8px;
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
 }
 .tiny-ghost-btn:hover {
   color: #fff;
@@ -1946,23 +1988,70 @@ a {
 .suggestions-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 .suggestion-item {
   width: 100%;
   text-align: left;
-  padding: 9px 12px;
+  padding: 8px 11px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.045);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12.8px;
+  line-height: 1.42;
   color: var(--text-0);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   transition: all 0.16s;
 }
 .suggestion-item:hover {
-  background: rgba(124, 92, 255, 0.18);
+  background: rgba(124, 92, 255, 0.22);
+  border-color: rgba(192, 132, 252, 0.5);
+  transform: translateX(2px);
+}
+.sug-num {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: rgba(124, 92, 255, 0.28);
+  color: #e9d5ff;
+  font-size: 10.5px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.sug-text {
+  flex: 1;
+  min-width: 0;
+}
+.suggestion-edit-btn {
+  width: 34px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-1);
+  font-size: 13px;
+  display: grid;
+  place-items: center;
+  transition: all 0.15s;
+}
+.suggestion-edit-btn:hover {
+  background: rgba(124, 92, 255, 0.24);
   border-color: rgba(168, 85, 247, 0.45);
+  color: #fff;
+}
+.sug-loading {
+  padding: 6px 4px;
+  color: #d8b4fe;
+  animation: pulseFade 1.2s ease-in-out infinite;
+}
+@keyframes pulseFade {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 
 /* Composer */
@@ -3107,6 +3196,21 @@ a {
 
 /* Responsive Breakpoints */
 @media (max-width: 1120px) {
+  .chat-header {
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .compact-select {
+    max-width: 128px;
+    font-size: 11.5px;
+    padding: 0 7px;
+  }
+  .mood-pill {
+    max-width: 96px;
+  }
+  .affinity-stage {
+    max-width: 92px;
+  }
   .anime-quick-row {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -3423,7 +3527,17 @@ a {
   }
   .suggestions-tray {
     width: calc(100% - 20px);
-    padding: 10px 12px;
+    padding: 8px 10px;
+  }
+  .suggestions-tray-head small {
+    display: none;
+  }
+  .suggestion-item {
+    padding: 7px 9px;
+    font-size: 12.2px;
+  }
+  .messages-inner.mode-novel .msg-actions {
+    opacity: 0.78;
   }
 
   .inspector-drawer.open {

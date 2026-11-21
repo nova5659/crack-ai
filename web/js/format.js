@@ -33,8 +33,11 @@ function formatInlineSegment(rawLine) {
   // Bold **...**
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 
-  // Narration *...* (single asterisks)
+  // Legacy narration *...* (single asterisks — rendered upright & refined in CSS, never ugly slanted Hangul)
   html = html.replace(/\*([^*\n]+)\*/g, '<span class="narration">$1</span>');
+
+  // Internal thought / monologue ‘...’
+  html = html.replace(/(‘[^’\n]+’)/g, '<span class="thought">$1</span>');
 
   // Quoted dialogue "..." or “...” (avoid matching HTML attribute quotes!)
   html = html.replace(/(&quot;[^&]*?&quot;|“[^”]*?”)/g, '<span class="dialogue">$1</span>');
@@ -83,7 +86,8 @@ export function formatStoryHtml(text = '') {
     }
 
     const lines = trimmed.split('\n').map((line) => formatInlineSegment(line));
-    out.push(`<p>${lines.join('<br />')}</p>`);
+    const isDialogueParagraph = /^["“]|^[^:\n]{1,18}:\s*["“]/.test(trimmed);
+    out.push(`<p class="${isDialogueParagraph ? 'dialogue-para' : 'prose-para'}">${lines.join('<br />')}</p>`);
   }
 
   return out.join('');

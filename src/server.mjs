@@ -233,6 +233,7 @@ async function handleChatStream(req, res, sessionId) {
 
   const contents = buildGeminiContents(historyForPrompt, {
     continueCue: action === 'continue',
+    viewMode,
   });
 
   // Start SSE stream
@@ -330,18 +331,28 @@ async function handleChatStream(req, res, sessionId) {
           }
         : curr.nationState;
 
+      const nextSuggestions =
+        Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
+          ? result.stateUpdate.choices
+          : curr.suggestedReplies;
+
       return {
         ...curr,
         affinity: nextAffinity,
         mood: nextMood,
         relationshipStage: nextStage,
         nationState: nextNationState,
+        suggestedReplies: nextSuggestions,
         messages: nextMessages,
       };
     });
 
     writeSse(res, 'done', {
       message: savedMessage,
+      suggestedReplies:
+        Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
+          ? result.stateUpdate.choices
+          : [],
       sessionState: {
         affinity: updatedSession.affinity,
         mood: updatedSession.mood,

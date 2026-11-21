@@ -61,6 +61,7 @@ const state = {
   editingMsgId: null,
   speakingMsgId: null,
   lastAutoSummaryCount: 0,
+  suggestionsAutoOpen: true,
 
   // Creator
   creatorAvatar: PRESET_AVATARS[0],
@@ -479,6 +480,7 @@ function bindStaticEvents() {
 
   $('#toggleSuggestionsBtn').addEventListener('click', toggleSuggestionsTray);
   $('#closeSuggestionsBtn').addEventListener('click', () => {
+    state.suggestionsAutoOpen = false;
     $('#suggestionsTray').hidden = true;
     $('#toggleSuggestionsBtn').classList.remove('active');
   });
@@ -1580,9 +1582,23 @@ function enterChatRoom(session, character, persona) {
   updateChatHeaderHud();
   syncInspectorFields();
   renderMessages();
-  renderSuggestionsList(session.suggestedReplies || []);
   renderSidebarSessions();
   switchView('chat');
+
+  // Auto-display suggested replies immediately on room entry (no extra click needed!)
+  const initialChoices = session.suggestedReplies || [];
+  if (state.suggestionsAutoOpen) {
+    if (initialChoices.length > 0) {
+      showSuggestionsDock(initialChoices);
+    } else if ((session.messages?.length || 0) >= 1) {
+      showSuggestionsDock([]);
+      refreshSuggestions(true);
+    }
+  } else {
+    renderSuggestionsList(initialChoices);
+    $('#suggestionsTray').hidden = true;
+    $('#toggleSuggestionsBtn').classList.remove('active');
+  }
   scrollToBottom(true);
 }
 
@@ -2006,6 +2022,9 @@ async function triggerChatStream({ action, text = '' }) {
   if (!state.activeSession || state.isStreaming) return;
   stopSpeech();
 
+  // Hide stale choices while the AI writes the new scene
+  $('#suggestionsTray').hidden = true;
+
   state.isStreaming = true;
   state.abortController = new AbortController();
   $('#sendBtn').classList.add('streaming');
@@ -2151,8 +2170,25 @@ async function triggerChatStream({ action, text = '' }) {
           state.activeSession = refreshed.session;
           updateChatHeaderHud(delta);
           renderMessages();
-          scrollToBottom(true);
           reloadSessions();
+
+          // Instant zero-click suggested replies right after every AI turn!
+          const freshChoices = Array.isArray(donePayload.suggestedReplies) && donePayload.suggestedReplies.length > 0
+            ? donePayload.suggestedReplies
+            : [];
+          if (state.suggestionsAutoOpen) {
+            if (freshChoices.length > 0) {
+              showSuggestionsDock(freshChoices);
+            } else {
+              // Fallback: silently generate tailored choices if this turn omitted inline choices
+              showSuggestionsDock([], true);
+              refreshSuggestions(true);
+            }
+          } else if (freshChoices.length > 0) {
+            renderSuggestionsList(freshChoices);
+          }
+
+          scrollToBottom(true);
 
           // Silent background auto-summary memory refresh every 10 turns in live Gemini mode
           const msgCount = refreshed.session.messages?.length || 0;
@@ -2195,70 +2231,92 @@ async function triggerChatStream({ action, text = '' }) {
   }
 }
 
+function showSuggestionsDock(list, isLoading = false) {
+  const tray = $('#suggestionsTray');
+  const btn = $('#toggleSuggestionsBtn');
+  if (isLoading) {
+    $('#suggestionsList').innerHTML = '<div class="field-hint sug-loading">✨ 방금 장면에 이어질 추천 선택지를 준비하는 중...</div>';
+  } else {
+    renderSuggestionsList(list);
+  }
+  tray.hidden = false;
+  btn.classList.add('active');
+}
+
 function toggleSuggestionsTray() {
   const tray = $('#suggestionsTray');
   const btn = $('#toggleSuggestionsBtn');
   const willOpen = tray.hidden;
+  state.suggestionsAutoOpen = willOpen;
   tray.hidden = !willOpen;
   btn.classList.toggle('active', willOpen);
-  if (willOpen && (!state.activeSession?.suggestedReplies?.length || state.activeSession.messages.length > 1)) {
-    refreshSuggestions(false);
+  if (willOpen && !state.activeSession?.suggestedReplies?.length) {
+    refreshSuggestions(true);
+  } else if (willOpen) {
+    renderSuggestionsList(state.activeSession.suggestedReplies);
   }
 }
 
 function renderSuggestionsList(list) {
   const container = $('#suggestionsList');
   if (!list || !list.length) {
-    container.innerHTML = '<div class="field-hint">새로 생성 버튼을 눌러 상황에 맞는 추천 답변을 받아보세요.</div>';
+    container.innerHTML = '<div class="field-hint">↻ 새로고침을 눌러 상황에 맞는 추천 선택지를 받아보세요.</div>';
     return;
   }
   container.innerHTML = list
     .map(
       (text, idx) => `
       <div class="suggestion-row">
-        <button type="button" class="suggestion-item" data-sug-idx="${idx}">${escapeHtml(text)}</button>
-        <button type="button" class="suggestion-send-btn" data-sug-send="${idx}" title="바로 전송">➤</button>
+        <button type="button" class="suggestion-item" data-sug-send="${idx}" title="누르면 바로 전송됩니다">
+          <span class="sug-num">${idx + 1}</span>
+          <span class="sug-text">${escapeHtml(text)}</span>
+        </button>
+        <button type="button" class="suggestion-edit-btn" data-sug-edit="${idx}" title="입력창으로 가져와 수정">✎</button>
       </div>`
     )
     .join('');
 
-  container.querySelectorAll('.suggestion-item').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const text = list[Number(btn.dataset.sugIdx)];
-      const input = $('#chatInput');
-      input.value = text;
-      autoResizeTextarea(input);
-      input.focus();
-      $('#suggestionsTray').hidden = true;
-      $('#toggleSuggestionsBtn').classList.remove('active');
-    });
-  });
-
+  // 1-Tap Instant Send on choice click!
   container.querySelectorAll('[data-sug-send]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const text = list[Number(btn.dataset.sugSend)];
       if (!text || state.isStreaming) return;
       $('#suggestionsTray').hidden = true;
-      $('#toggleSuggestionsBtn').classList.remove('active');
       triggerChatStream({ action: 'send', text });
+    });
+  });
+
+  // Optional Edit button loads choice into composer
+  container.querySelectorAll('[data-sug-edit]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const text = list[Number(btn.dataset.sugEdit)];
+      const input = $('#chatInput');
+      input.value = text;
+      autoResizeTextarea(input);
+      input.focus();
     });
   });
 }
 
 async function refreshSuggestions(force = true) {
   if (!state.activeSession) return;
+  const targetSessionId = state.activeSession.id;
   if (!force && state.activeSession.suggestedReplies?.length && state.activeSession.messages.length <= 1) {
     renderSuggestionsList(state.activeSession.suggestedReplies);
     return;
   }
   const listEl = $('#suggestionsList');
-  listEl.innerHTML = '<div class="field-hint">✨ 상황에 맞는 추천 답변 3개를 작성하는 중...</div>';
+  listEl.innerHTML = '<div class="field-hint sug-loading">✨ 상황에 맞는 추천 선택지 3개를 작성하는 중...</div>';
   try {
-    const res = await api.generateSuggestions(state.activeSession.id);
+    const res = await api.generateSuggestions(targetSessionId);
+    if (state.activeSession?.id !== targetSessionId) return;
     state.activeSession.suggestedReplies = res.suggestions || [];
     renderSuggestionsList(state.activeSession.suggestedReplies);
+    scrollToBottom(true);
   } catch (err) {
-    listEl.innerHTML = `<div class="field-hint" style="color:#fda4af;">${escapeHtml(err.message)}</div>`;
+    if (state.activeSession?.id !== targetSessionId) return;
+    listEl.innerHTML = `<div class="field-hint" style="color:#fda4af;">${escapeHtml(humanizeError(err))}</div>`;
   }
 }
 

@@ -476,14 +476,14 @@
               </div>
 
               <select class="compact-select" id="chatAiModeSelect" title="AI 생성 모드">
-                <option value="story">⚡ 쾌속 스토리 (3.5 Lite · 추천)</option>
-                <option value="deep">✦ 심화 서사 (3 Flash)</option>
-                <option value="pro">🔥 프로 추론 (3.8 · 자동우회)</option>
-                <option value="speed">💨 초고속 티키타카</option>
+                <option value="story">⚡ 쾌속 스토리</option>
+                <option value="deep">✦ 심화 서사</option>
+                <option value="pro">🔥 프로 추론</option>
+                <option value="speed">💨 초고속</option>
               </select>
 
               <button class="pill-btn inspector-toggle-btn" id="toggleInspectorBtn" title="유저노트 · 메모리 · 로어북">
-                <span>⚙️</span><span class="btn-label">스토리 설정</span>
+                <span>⚙️</span><span class="btn-label">설정</span>
               </button>
             </div>
           </header>
@@ -504,13 +504,13 @@
                 <div class="messages-inner mode-novel" id="messagesInner"></div>
               </div>
 
-              <!-- Suggested Replies Tray (Crack signature feature) -->
-              <div class="suggestions-tray" id="suggestionsTray" hidden>
+              <!-- Auto-Visible Suggested Replies Dock (클릭 없이 매 턴 자동 표시 · 원탭 즉시 전개) -->
+              <div class="suggestions-tray auto-dock" id="suggestionsTray" hidden>
                 <div class="suggestions-tray-head">
-                  <span>💡 추천 답변 <small>(클릭하면 입력창에 채워져 수정할 수 있어요)</small></span>
+                  <span>✨ 바로 이어갈 추천 선택지 <small>(누르면 즉시 전송 · ✎ 편집)</small></span>
                   <div class="suggestions-tray-actions">
-                    <button class="tiny-ghost-btn" id="refreshSuggestionsBtn">↻ 새로 생성</button>
-                    <button class="tiny-ghost-btn" id="closeSuggestionsBtn">✕</button>
+                    <button type="button" class="tiny-ghost-btn" id="refreshSuggestionsBtn" title="새 추천 답변 생성">↻ 새로고침</button>
+                    <button type="button" class="tiny-ghost-btn" id="closeSuggestionsBtn" title="접기">▾ 접기</button>
                   </div>
                 </div>
                 <div class="suggestions-list" id="suggestionsList"></div>

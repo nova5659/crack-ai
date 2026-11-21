@@ -1,14 +1,18 @@
 import { renderTemplate } from './presets.mjs';
 
 const LENGTH_GUIDES = {
-  short: '분량 가이드: 간결하고 템포 빠르게 2~3문단 (약 180~320자)으로 응답하세요.',
-  medium: '분량 가이드: 몰입감 있는 한국 웹소설 한 장면 분량으로 3~5문단 (약 400~750자)으로 응답하세요.',
-  long: '분량 가이드: 풍성한 웹소설 1화 분량처럼 세밀한 내면 묘사, 공간감, 대화를 담아 5~8문단 (약 800~1400자)으로 응답하세요.',
+  short: '분량 가이드: 간결하고 호흡 빠르게 2~3문단(약 200~340자)으로 한 장면을 깔끔하게 끊어 쓰세요.',
+  medium: '분량 가이드: 실제 한국 상업 웹소설의 밀도 있는 한 장면 분량으로 4~6문단(약 450~820자)으로 작성하세요.',
+  long: '분량 가이드: 웹소설 1화 클라이맥스처럼 풍성한 공간감·감정선·대사를 담아 6~9문단(약 850~1450자)으로 작성하세요.',
 };
 
 const STYLE_GUIDES = {
-  novel: '문체 형식: 한국 인기 웹소설·스토리 채팅 형식. 상황·행동·표정·심리 묘사는 *별표*로 감싸고, 캐릭터의 대사는 큰따옴표("...")로 구분해 생생하게 작성하세요.',
-  chat: '문체 형식: 자연스러운 몰입형 메신저 대화 스타일. 짧은 *행동 지문*과 자연스러운 구어체 대사를 조화롭게 섞어 답하세요.',
+  novel: `문체 형식 (한국 상업 웹소설 베스트셀러 집필 기준):
+- 실제 카카오페이지·문피아 출간 웹소설처럼 작성하세요. 서술 문장에 별표(*)나 마크다운 기울임을 절대 쓰지 마세요.
+- 대사는 큰따옴표("...")로, 인물의 속마음은 작은따옴표(‘...’)로만 구분하세요.
+- [서술 2줄 → 대사 → 서술 2줄 → 대사] 같은 기계적인 교대 패턴을 깨세요! 짧은 한 문장으로 호흡을 끊기도 하고, 서술 두 문단 뒤에 짧은 대사 한 마디를 던지거나, 대사 사이에 짧은 시선·호흡만 끼워 넣는 등 실제 소설가처럼 완급과 호흡을 자유롭게 조절하세요.
+- "기특하다는 듯", "오롯이", "~한 것일까", "고스란히", "묘한 ~이 스쳤다" 같은 AI 번역투·과잉 수식어를 금지하고, 건조하면서도 선명한 감각 묘사(소리·온도·빛·거리·손끝의 움직임)로 장면을 생생하게 그려내세요.`,
+  chat: '문체 형식: 몰입감 있는 실시간 대화 스타일. 간결한 행동 묘사(*짧은 동작*)와 살아 있는 구어체 대사를 자연스럽게 섞어 빠른 템포로 이어가세요.',
 };
 
 export function findTriggeredLorebooks(lorebook = [], recentMessages = [], latestUserText = '') {
@@ -137,33 +141,49 @@ export function buildSystemInstruction({
     `\n[현재 감정 및 관계 상태]\n- 현재 호감도: ${session.affinity ?? 35}/100\n- 현재 감정 상태: ${session.mood || '호기심'}\n- 관계 단계: ${session.relationshipStage || '첫 만남'}`
   );
 
+  const userRefGuide =
+    ctx.userName === '나'
+      ? '유저 호칭/시점 주의: 유저의 기본 이름이 "나"로 되어 있더라도, 절대 AI가 1인칭("내 목소리", "내 귓가", "나를 향해")으로 유저의 시점을 가로채 서술하지 마세요! 캐릭터의 시점(또는 자연스러운 3인칭 관찰자 시점)에서 상대를 "그/그녀" 대신 상황과 캐릭터 말투에 맞는 자연스러운 호칭("너", "당신", "자네" 등 대사 속 2인칭 + 지문에서는 "앞에 선 상대", "그의 앞", 혹은 자연스러운 시선 묘사)으로 매끄럽게 서술하세요.'
+      : `유저 호칭/시점: 지문에서는 "${ctx.userName}"을(를) 자연스러운 3인칭으로 호칭하고, 대사에서는 캐릭터 성격에 맞는 호칭으로 부르세요. 절대 "${ctx.userName}"의 대사·행동·속마음을 대신 결정해 쓰지 마세요.`;
+
   parts.push(
-    `\n[서술 및 출력 규칙]
+    `\n[서술 및 연속성 절대 규칙]
 1. ${STYLE_GUIDES[viewMode] || STYLE_GUIDES.novel}
 2. ${LENGTH_GUIDES[outputLength] || LENGTH_GUIDES.medium}
-3. ${ctx.userName}의 대사나 행동을 대신 결정해 쓰지 말고, 오직 ${character.name}의 시선·반응·주변 환경 묘사에 집중하세요.
-4. 직전 대화의 감정선과 복선을 자연스럽게 이어가고, 반복적인 상투어를 피하세요.
-5. ${isContinue ? '방금 끊긴 장면의 흐름을 자연스럽게 이어서 다음 전개와 대사를 서술하세요.' : `${ctx.userName}의 최신 입력에 즉각적이고 입체적으로 반응하세요.`}
-6. 응답의 맨 마지막 줄에만(본문과 줄바꿈 1회 후) 아래 형식의 숨김 상태 태그를 정확히 1줄 덧붙이세요. 본문 안에 JSON이나 설명을 쓰지 마세요:
+3. [장면 연속성 최우선] 직전 턴의 마지막 위치·거리·자세·소품·표정·대사를 첫 문장에서 물리적으로 자연스럽게 이어받으세요. 인물이 갑자기 다른 자세로 순간이동하거나 상황이 초기화되면 안 됩니다.
+4. ${userRefGuide}
+5. [AI 번역투·클리셰 금지] "~한 것일까", "고스란히 담겨 있었다", "묘한 ~이 스쳤다", "기묘한 침묵이 흘렀다", "어때, 감이 좀 와?", "이제 진짜 시작이야!" 같은 상투적 AI 표현과 요약식 마무리 멘트를 절대 쓰지 마세요.
+6. ${isContinue ? '방금 끊긴 문장과 장면의 숨결을 그대로 이어받아 다음 사건과 대사로 매끄럽게 전개하세요.' : '상대방의 직전 대사·행동에 즉각적이고 입체적으로 반응하며, 마지막 문장은 다음 전개를 자연스럽게 열어두는 여운·긴장감 있는 훅으로 마무리하세요.'}
+7. 응답의 맨 마지막 줄에만(본문과 줄바꿈 1회 후) 아래 형식의 숨김 상태 태그를 정확히 1줄 덧붙이세요. 본문 안에 JSON이나 설명을 절대 쓰지 마세요.
+   - choices 배열에는 방금 끝난 장면 직후 유저가 바로 이어 선택할 만한 서로 다른 분위기의 행동/대사 3개(1: 적극 돌파 / 2: 감정·도발·티키타카 / 3: 신중·탐색·변수)를 각 15~52자 한국어로 작성하세요. (JSON 오류 방지를 위해 choices 문자열 안의 대사는 작은따옴표('...')만 사용)
 ${character.isNationSim
-  ? '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재정국2~12자","nation":{"name":"국가명","date":"YYYY년 M월 (N턴)","power":0~100정수,"treasury":"재정요약","approval":0~100정수,"military":0~100정수,"stability":0~100정수}}-->'
-  : '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재감정2~12자"}-->'}`
+  ? '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재정국2~12자","nation":{"name":"국가명","date":"YYYY년 M월 (N턴)","power":0~100정수,"treasury":"재정요약","approval":0~100정수,"military":0~100정수,"stability":0~100정수},"choices":["적극 정책/행동 1문장","외교·정치 승부수 1문장","신중·정보 파악 1문장"]}-->'
+  : '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재감정2~12자","choices":["적극적 행동·대사 1문장","감정·도발 대사 1문장","신중·탐색 행동 1문장"]}-->'}`
   );
 
   return parts.join('\n');
 }
 
+function stripNarrativeAsterisks(text = '') {
+  // Remove single-asterisk RP wrappers (*...*) from past model turns in novel mode
+  // so Gemini does not few-shot mimic asterisk narration, while preserving **bold** headings.
+  return String(text).replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '$1');
+}
+
 /**
  * Gemini 3.x requires strictly alternating user/model turns and must ALWAYS end with a `user` turn.
  */
-export function buildGeminiContents(messages = [], { maxHistory = 28, continueCue = false } = {}) {
+export function buildGeminiContents(messages = [], { maxHistory = 28, continueCue = false, viewMode = 'novel' } = {}) {
   const slice = messages.slice(-maxHistory);
   const rawTurns = [];
 
   for (const m of slice) {
     const role = m.role === 'user' ? 'user' : 'model';
-    const text = String(m.content || '').trim();
+    let text = String(m.content || '').trim();
     if (!text) continue;
+    if (viewMode === 'novel' && role === 'model') {
+      text = stripNarrativeAsterisks(text);
+    }
     rawTurns.push({ role, text });
   }
 

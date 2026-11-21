@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crack-ai-shell-v5';
+const CACHE_NAME = 'crack-ai-shell-v6';
 const RELATIVE_CORE_ASSETS = [
   './',
   './index.html',

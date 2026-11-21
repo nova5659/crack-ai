@@ -112,12 +112,20 @@ function isInvalidKeyError(status, errMsg = '') {
   return /api[\s_-]*key[\s_-]*(not[\s_-]*valid|invalid|expired)|API_KEY_INVALID/i.test(String(errMsg || ''));
 }
 
+function normalizeChoiceText(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  s = s.replace(/(^|\s)'([^'\n]{2,90})'(?=\s|$|[.,!?])/g, '$1"$2"');
+  return s.slice(0, 120);
+}
+
 function parseStateTag(fullText = '') {
   const match = fullText.match(STATE_TAG_REGEX);
   let stateUpdate = null;
   if (match) {
+    const rawJson = match[1];
     try {
-      const parsed = JSON.parse(match[1]);
+      const parsed = JSON.parse(rawJson);
       const rawDelta = Number(parsed.affinityDelta);
       const delta = Number.isFinite(rawDelta) ? Math.max(-5, Math.min(6, Math.round(rawDelta))) : 0;
       const mood = typeof parsed.mood === 'string' && parsed.mood.trim() ? parsed.mood.trim().slice(0, 28) : null;
@@ -135,12 +143,38 @@ function parseStateTag(fullText = '') {
           stability: n.stability !== undefined ? clamp(n.stability, 65) : undefined,
         };
       }
-      stateUpdate = { affinityDelta: delta, mood, nation };
+      const choices = Array.isArray(parsed.choices)
+        ? parsed.choices.map(normalizeChoiceText).filter(Boolean).slice(0, 3)
+        : [];
+      stateUpdate = { affinityDelta: delta, mood, nation, choices };
     } catch {
-      stateUpdate = null;
+      const dMatch = rawJson.match(/"affinityDelta"\s*:\s*(-?\d+)/);
+      const mMatch = rawJson.match(/"mood"\s*:\s*"([^"]{1,28})"/);
+      const cMatch = rawJson.match(/"choices"\s*:\s*\[([\s\S]*?)\]/);
+      const choices = [];
+      if (cMatch) {
+        const itemRe = /"((?:\\.|[^"\\])+)"/g;
+        let it;
+        while ((it = itemRe.exec(cMatch[1])) && choices.length < 3) {
+          const txt = normalizeChoiceText(it[1].replace(/\\"/g, '"'));
+          if (txt) choices.push(txt);
+        }
+      }
+      if (dMatch || mMatch || choices.length) {
+        const rawDelta = dMatch ? Number(dMatch[1]) : 0;
+        stateUpdate = {
+          affinityDelta: Number.isFinite(rawDelta) ? Math.max(-5, Math.min(6, Math.round(rawDelta))) : 0,
+          mood: mMatch ? mMatch[1].trim() : null,
+          nation: null,
+          choices,
+        };
+      }
     }
   }
-  return { cleanText: fullText.replace(STATE_TAG_REGEX, '').trimEnd(), stateUpdate };
+  return {
+    cleanText: fullText.replace(STATE_TAG_REGEX, '').replace(/<!--\s*CRACK_STATE[\s\S]*$/i, '').trimEnd(),
+    stateUpdate,
+  };
 }
 
 function createStreamingTagFilter(onCleanDelta) {
@@ -227,13 +261,17 @@ function findTriggeredLorebooks(lorebook = [], recentMessages = [], latestUserTe
 function buildSystemInstruction({ character, session, persona, triggeredLorebooks, outputLength = 'medium', viewMode = 'novel', isContinue = false }) {
   const ctx = { userName: persona?.name || '나', charName: character.name };
   const lenMap = {
-    short: '분량 가이드: 간결하고 템포 빠르게 2~3문단 (약 180~320자)으로 응답하세요.',
-    medium: '분량 가이드: 몰입감 있는 한국 웹소설 한 장면 분량으로 3~5문단 (약 400~750자)으로 응답하세요.',
-    long: '분량 가이드: 풍성한 웹소설 1화 분량처럼 세밀한 내면 묘사, 공간감, 대화를 담아 5~8문단 (약 800~1400자)으로 응답하세요.',
+    short: '분량 가이드: 간결하고 호흡 빠르게 2~3문단(약 200~340자)으로 한 장면을 깔끔하게 끊어 쓰세요.',
+    medium: '분량 가이드: 실제 한국 상업 웹소설의 밀도 있는 한 장면 분량으로 4~6문단(약 450~820자)으로 작성하세요.',
+    long: '분량 가이드: 웹소설 1화 클라이맥스처럼 풍성한 공간감·감정선·대사를 담아 6~9문단(약 850~1450자)으로 작성하세요.',
   };
   const styleMap = {
-    novel: '문체 형식: 한국 인기 웹소설·스토리 채팅 형식. 상황·행동·표정·심리 묘사는 *별표*로 감싸고, 캐릭터의 대사는 큰따옴표("...")로 구분해 생생하게 작성하세요.',
-    chat: '문체 형식: 자연스러운 몰입형 메신저 대화 스타일. 짧은 *행동 지문*과 자연스러운 구어체 대사를 조화롭게 섞어 답하세요.',
+    novel: `문체 형식 (한국 상업 웹소설 베스트셀러 집필 기준):
+- 실제 카카오페이지·문피아 출간 웹소설처럼 작성하세요. 서술 문장에 별표(*)나 마크다운 기울임을 절대 쓰지 마세요.
+- 대사는 큰따옴표("...")로, 인물의 속마음은 작은따옴표(‘...’)로만 구분하세요.
+- [서술 2줄 → 대사 → 서술 2줄 → 대사] 같은 기계적인 교대 패턴을 깨세요! 짧은 한 문장으로 호흡을 끊기도 하고, 서술 두 문단 뒤에 짧은 대사 한 마디를 던지거나, 대사 사이에 짧은 시선·호흡만 끼워 넣는 등 실제 소설가처럼 완급과 호흡을 자유롭게 조절하세요.
+- "기특하다는 듯", "오롯이", "~한 것일까", "고스란히", "묘한 ~이 스쳤다" 같은 AI 번역투·과잉 수식어를 금지하고, 건조하면서도 선명한 감각 묘사(소리·온도·빛·거리·손끝의 움직임)로 장면을 생생하게 그려내세요.`,
+    chat: '문체 형식: 몰입감 있는 실시간 대화 스타일. 간결한 행동 묘사(*짧은 동작*)와 살아 있는 구어체 대사를 자연스럽게 섞어 빠른 템포로 이어가세요.',
   };
 
   const parts = [];
@@ -275,25 +313,35 @@ function buildSystemInstruction({ character, session, persona, triggeredLorebook
     parts.push(`\n[발동된 로어북]\n${triggeredLorebooks.map((l) => `- ${l.title}: ${renderTemplate(l.content, ctx)}`).join('\n')}`);
   }
   parts.push(`\n[현재 감정 상태]\n- 호감도: ${session.affinity ?? 35}/100 · 감정: ${session.mood || '호기심'} · 관계: ${session.relationshipStage || '첫 만남'}`);
-  parts.push(`\n[서술 규칙]
+  const userRefGuide =
+    ctx.userName === '나'
+      ? '유저 호칭/시점 주의: 유저의 기본 이름이 "나"로 되어 있더라도 절대 AI가 1인칭("내 목소리", "내 귓가", "나를 향해")으로 유저의 시점을 가로채 서술하지 마세요! 캐릭터의 시점(또는 자연스러운 3인칭 관찰자 시점)에서 대사 속 2인칭("너", "당신" 등)과 자연스러운 지문 시선으로 매끄럽게 서술하세요.'
+      : `유저 호칭/시점: 지문에서는 "${ctx.userName}"을(를) 자연스러운 3인칭으로 호칭하고, 대사에서는 캐릭터 성격에 맞는 호칭으로 부르세요. 절대 "${ctx.userName}"의 대사·행동·속마음을 대신 결정해 쓰지 마세요.`;
+
+  parts.push(`\n[서술 및 연속성 절대 규칙]
 1. ${styleMap[viewMode] || styleMap.novel}
 2. ${lenMap[outputLength] || lenMap.medium}
-3. ${ctx.userName}의 대사/행동을 대신 쓰지 말고 ${character.name} 측 반응과 묘사에 집중하세요.
-4. ${isContinue ? '방금 끊긴 장면을 자연스럽게 이어서 서술하세요.' : `${ctx.userName}의 최신 입력에 입체적으로 반응하세요.`}
-5. 맨 마지막 줄에만(줄바꿈 1회 후) 숨김 상태 태그 1줄을 덧붙이세요:
+3. [장면 연속성 최우선] 직전 턴의 마지막 위치·거리·자세·소품·표정·대사를 첫 문장에서 물리적으로 자연스럽게 이어받으세요. 인물이 갑자기 다른 자세로 순간이동하거나 상황이 초기화되면 안 됩니다.
+4. ${userRefGuide}
+5. [AI 번역투·클리셰 금지] "~한 것일까", "고스란히 담겨 있었다", "묘한 ~이 스쳤다", "기묘한 침묵이 흘렀다", "어때, 감이 좀 와?", "이제 진짜 시작이야!" 같은 상투적 AI 표현을 절대 쓰지 마세요.
+6. ${isContinue ? '방금 끊긴 문장과 장면의 숨결을 그대로 이어받아 다음 사건과 대사로 매끄럽게 전개하세요.' : '상대방의 직전 대사·행동에 즉각적이고 입체적으로 반응하며, 마지막 문장은 다음 전개를 자연스럽게 열어두는 여운·긴장감 있는 훅으로 마무리하세요.'}
+7. 맨 마지막 줄에만(줄바꿈 1회 후) 숨김 상태 태그 1줄을 덧붙이세요. choices 배열에는 방금 끝난 장면 직후 유저가 선택할 만한 서로 다른 분위기의 행동/대사 3개(각 15~52자, 내부 대사는 작은따옴표 '...'만 사용)를 반드시 포함하세요:
 ${character.isNationSim
-  ? '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재정국2~12자","nation":{"name":"국가명","date":"YYYY년 M월 (N턴)","power":0~100정수,"treasury":"재정요약","approval":0~100정수,"military":0~100정수,"stability":0~100정수}}-->'
-  : '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재감정2~12자"}-->'}`);
+  ? '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재정국2~12자","nation":{"name":"국가명","date":"YYYY년 M월 (N턴)","power":0~100정수,"treasury":"재정요약","approval":0~100정수,"military":0~100정수,"stability":0~100정수},"choices":["적극 정책/행동 1문장","외교·정치 승부수 1문장","신중·정보 파악 1문장"]}-->'
+  : '<!--CRACK_STATE:{"affinityDelta":정수(-5~+6),"mood":"현재감정2~12자","choices":["적극적 행동·대사 1문장","감정·도발 대사 1문장","신중·탐색 행동 1문장"]}-->'}`);
 
   return parts.join('\n');
 }
 
-function buildGeminiContents(messages = [], { maxHistory = 28, continueCue = false } = {}) {
+function buildGeminiContents(messages = [], { maxHistory = 28, continueCue = false, viewMode = 'novel' } = {}) {
   const merged = [];
   for (const m of messages.slice(-maxHistory)) {
     const role = m.role === 'user' ? 'user' : 'model';
-    const text = String(m.content || '').trim();
+    let text = String(m.content || '').trim();
     if (!text) continue;
+    if (viewMode === 'novel' && role === 'model') {
+      text = text.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '$1');
+    }
     if (merged.length && merged[merged.length - 1].role === role) {
       merged[merged.length - 1].text += `\n\n${text}`;
     } else {
@@ -644,12 +692,12 @@ async function streamDemoCloud({ character, persona, userMessage, triggeredLoreb
   const userName = persona?.name || '나';
   const charName = character.name;
   const quoted = String(userMessage || '').replace(/\s+/g, ' ').trim().slice(0, 40);
-  const loreHint = triggeredLorebooks.length ? `\n\n*그 순간 '${triggeredLorebooks[0].title}'에 얽힌 기억이 스치며 공기가 달라졌다.*` : '';
+  const loreHint = triggeredLorebooks.length ? `\n\n그 순간 '${triggeredLorebooks[0].title}'에 얽힌 기억이 스치며 공기가 달라졌다.` : '';
   const fullText = character.isNationSim
-    ? `*비서실장이 긴급 보고서를 전략 탁자 위에 펼쳐 놓으며 숨을 골랐다. 집무실의 각 부처 장관들이 일제히 시선을 집중했다.*\n\n"각하, 방금 하달하신 지시(${quoted || '국정 개혁 명령'})가 전국과 각국 대사관에 즉시 전파되었습니다!"${loreHint}\n\n**[ 긴급 속보 · 국제 뉴스 ]**\n- [속보] ${userName} 지도자, 전격 국정 드라이브 선언… 증시·여론 즉각 반응\n- [국제] 주변 열강 외무부 "향후 행보 예의주시" 긴급 논평 발표\n\n**[ 국가 상태창 · 대한민국 ]**\n- 시점: 2026년 2월 (1턴) · 지도자: ${userName}\n- 국력: 74/100 · 재정: 645조 원 · 지지율: 61% (+3%) · 군사력: 82/100 · 안정도: 71/100\n- 긴급 현안: 야당의 긴급 대정부 질문 대응 및 주변국 무역 협상`
+    ? `비서실장이 긴급 보고서를 전략 탁자 위에 펼쳐 놓으며 숨을 골랐다. 집무실의 각 부처 장관들이 일제히 시선을 집중했다.\n\n"각하, 방금 하달하신 지시(${quoted || '국정 개혁 명령'})가 전국과 각국 대사관에 즉시 전파되었습니다."${loreHint}\n\n**[ 긴급 속보 · 국제 뉴스 ]**\n- [속보] ${userName} 지도자, 전격 국정 드라이브 선언… 증시·여론 즉각 반응\n- [국제] 주변 열강 외무부 "향후 행보 예의주시" 긴급 논평 발표\n\n**[ 국가 상태창 · 대한민국 ]**\n- 시점: 2026년 2월 (1턴) · 지도자: ${userName}\n- 국력: 74/100 · 재정: 645조 원 · 지지율: 61% (+3%) · 군사력: 82/100 · 안정도: 71/100\n- 긴급 현안: 야당의 긴급 대정부 질문 대응 및 주변국 무역 협상`
     : character.isAnime && character.playStyle === 'world'
-    ? `*「${character.animeTitle || charName}」 세계의 공기가 요동쳤다! ${character.castMembers?.[0] || charName}이(가) ${userName}을(를) 보며 눈을 번뜩였다.*\n\n${character.castMembers?.[0] || charName}: "${quoted ? `${quoted}... 좋아, ${userName}! 네 각오는 확실히 전해졌어!` : `자 ${userName}, 지금부터 진짜 시작이야!`}"${loreHint}\n\n**[ ${character.animeTitle || '애니 월드'} 진행 상태창 ]**\n- 고유 시스템(${character.powerSystem || '능력'}) 활성화 · 호감도 +2`
-    : `*${charName}의 시선이 ${userName}에게 고정되었다. 정적 속에 묘한 긴장감과 설렘이 번졌다.*\n\n"${quoted ? `방금 한 말... 진심인가, ${userName}?` : `갑자기 말없이 쳐다보면 곤란한데, ${userName}.`}"\n\n*${charName}이(가) 천천히 한 걸음 가까이 다가섰다.*${loreHint}\n\n"좋아. 네가 선택한 그 결말, 내가 끝까지 지켜봐 주지."`;
+    ? `「${character.animeTitle || charName}」 세계의 공기가 팽팽하게 당겨졌다. ${character.castMembers?.[0] || charName}이(가) 고개를 돌려 시선을 맞췄다.\n\n${character.castMembers?.[0] || charName}: "${quoted ? `${quoted}… 좋아, 각오는 확실히 전해졌어.` : `자, 여기서부터 움직여 볼까.`}"${loreHint}\n\n**[ ${character.animeTitle || '애니 월드'} 진행 상태창 ]**\n- 고유 시스템(${character.powerSystem || '능력'}) 활성화 · 호감도 +2`
+    : `${charName}의 시선이 천천히 멈췄다. 정적 속에 팽팽한 긴장감이 감돌았다.\n\n"${quoted ? `방금 한 말… 진심인가.` : `그렇게 말없이 쳐다보면 곤란한데.`}"\n\n${charName}이(가) 반 걸음 가까이 다가섰다.${loreHint}\n\n"좋아. 네가 선택한 그 결말, 끝까지 지켜봐 주지."`;
 
   const chars = [...fullText];
   for (let i = 0; i < chars.length; i += 4) {
@@ -657,6 +705,17 @@ async function streamDemoCloud({ character, persona, userMessage, triggeredLoreb
     onDelta(chars.slice(i, i + 4).join(''));
     await new Promise((r) => setTimeout(r, 16));
   }
+  const demoChoices = character.isNationSim
+    ? [
+        '긴급 국무회의를 소집해 경제 부양책을 즉시 발표한다.',
+        '주변국 대사들을 불러 직접 외교 담판을 짓는다.',
+        '비서실장에게 야당과 여론의 핵심 불만부터 보고받는다.',
+      ]
+    : [
+        '"좋아, 지금 바로 정면으로 돌파해 보자."',
+        `${charName}의 눈을 똑바로 마주 보며 한 걸음 다가선다.`,
+        '"잠깐, 숨기고 있는 조건이 하나 더 있지 않아?"',
+      ];
   return {
     text: fullText,
     stateUpdate: character.isNationSim
@@ -664,8 +723,9 @@ async function streamDemoCloud({ character, persona, userMessage, triggeredLoreb
           affinityDelta: 3,
           mood: '국정 개혁 드라이브',
           nation: { name: '대한민국', date: '2026년 2월 (1턴)', power: 74, treasury: '645조 원', approval: 61, military: 82, stability: 71 },
+          choices: demoChoices,
         }
-      : { affinityDelta: 2, mood: '흥미와 떨림' },
+      : { affinityDelta: 2, mood: '흥미와 떨림', choices: demoChoices },
     modelUsed: 'demo-preview',
     fallbackFrom: null,
     isDemo: true,
@@ -1149,7 +1209,10 @@ export const cloudBackend = {
       viewMode: payload.viewMode || cfg.viewMode || 'novel',
       isContinue: action === 'continue',
     });
-    const contents = buildGeminiContents(historyForPrompt, { continueCue: action === 'continue' });
+    const contents = buildGeminiContents(historyForPrompt, {
+      continueCue: action === 'continue',
+      viewMode: payload.viewMode || cfg.viewMode || 'novel',
+    });
 
     const useLive = hasAnyApiKey();
     if (onStart) onStart({ action, triggeredLorebooks: triggered, isDemo: !useLive });
@@ -1210,16 +1273,26 @@ export const cloudBackend = {
           }
         : session.nationState;
 
+      const nextSuggestions =
+        Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
+          ? result.stateUpdate.choices
+          : session.suggestedReplies;
+
       const { session: updated } = await this.updateSession(sessionId, {
         affinity: nextAff,
         mood: nextMood,
         nationState: nextNationState,
+        suggestedReplies: nextSuggestions,
         messages: msgs,
       });
 
       if (onDone) {
         onDone({
           message: savedMessage,
+          suggestedReplies:
+            Array.isArray(result.stateUpdate?.choices) && result.stateUpdate.choices.length > 0
+              ? result.stateUpdate.choices
+              : [],
           sessionState: {
             affinity: updated.affinity,
             mood: updated.mood,
