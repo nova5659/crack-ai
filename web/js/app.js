@@ -52,11 +52,15 @@ const state = {
   activePersona: null,
   viewMode: 'novel',
   fontFamily: 'sans',
+  fontSize: 'md',
+  backdropMode: 'dim',
   aiMode: 'story',
   outputLength: 'medium',
   isStreaming: false,
   abortController: null,
   editingMsgId: null,
+  speakingMsgId: null,
+  lastAutoSummaryCount: 0,
 
   // Creator
   creatorAvatar: PRESET_AVATARS[0],
@@ -65,6 +69,93 @@ const state = {
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+function humanizeError(err) {
+  const raw = typeof err === 'string' ? err : (err?.message || '알 수 없는 오류가 발생했습니다.');
+  if (/load failed|failed to fetch|networkerror|network request failed|불러올 수 없/i.test(raw)) {
+    return '네트워크 또는 AI 서버 응답이 일시적으로 끊어졌습니다. 인터넷 연결을 확인한 뒤 [↺ 다시 시도]를 눌러주세요. (API 키가 올바른지도 확인해 주세요)';
+  }
+  if (/aborted|timeout/i.test(raw) && !/응답 생성을 중지/i.test(raw)) {
+    return 'AI 응답 대기 시간이 초과되었습니다. [↺ 다시 시도]를 누르면 가장 빠른 무료 모델(Gemini 3.5 Flash-Lite)로 즉시 연결됩니다.';
+  }
+  return raw;
+}
+
+function resolveModelForMode(mode) {
+  if (mode === 'deep') return 'gemini-3-flash-preview';
+  if (mode === 'pro') return 'gemini-3.8-flash';
+  if (mode === 'speed') return 'gemini-3.5-flash-lite';
+  return state.config?.defaultModel || 'gemini-3.5-flash-lite';
+}
+
+function stopSpeech() {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+  }
+  state.speakingMsgId = null;
+  $$('.msg-act-btn.speaking').forEach((b) => {
+    b.classList.remove('speaking');
+    b.textContent = '🔊 듣기';
+  });
+}
+
+function toggleSpeakMessage(msgId, rawText, btnEl) {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    showToast('이 브라우저에서는 음성 읽기(TTS)를 지원하지 않습니다.', 'error');
+    return;
+  }
+  if (state.speakingMsgId === msgId) {
+    stopSpeech();
+    return;
+  }
+  stopSpeech();
+  const clean = String(rawText || '')
+    .replace(/\*\*\[[\s\S]*?\]\*\*/g, '')
+    .replace(/[*_~`#>]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return;
+
+  try {
+    const utter = new SpeechSynthesisUtterance(clean);
+    utter.lang = 'ko-KR';
+    utter.rate = 1.03;
+    state.speakingMsgId = msgId;
+    if (btnEl) {
+      btnEl.classList.add('speaking');
+      btnEl.textContent = '⏹ 정지';
+    }
+    utter.onend = () => {
+      if (state.speakingMsgId === msgId) stopSpeech();
+    };
+    utter.onerror = () => {
+      if (state.speakingMsgId === msgId) stopSpeech();
+    };
+    window.speechSynthesis.speak(utter);
+  } catch {
+    showToast('음성 재생에 실패했습니다.', 'error');
+  }
+}
+
+function insertComposerFormat(prefix, suffix, innerPlaceholder = '') {
+  const input = $('#chatInput');
+  if (!input) return;
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  const selected = input.value.slice(start, end);
+  const middle = selected || innerPlaceholder;
+  const nextVal = input.value.slice(0, start) + prefix + middle + suffix + input.value.slice(end);
+  input.value = nextVal;
+  autoResizeTextarea(input);
+  input.focus();
+  const caretStart = start + prefix.length;
+  const caretEnd = caretStart + middle.length;
+  try {
+    input.setSelectionRange(selected ? caretEnd + suffix.length : caretStart, selected ? caretEnd + suffix.length : caretEnd);
+  } catch {
+    // ignore on unsupported mobile browsers
+  }
+}
 
 function showToast(message, type = 'info') {
   const stack = $('#toastStack');
@@ -106,12 +197,15 @@ async function init() {
 
     state.viewMode = cfg.viewMode || 'novel';
     state.fontFamily = cfg.fontFamily || 'sans';
+    state.fontSize = cfg.fontSize || 'md';
+    state.backdropMode = cfg.backdropMode || 'dim';
     state.aiMode = cfg.defaultMode || 'story';
     state.outputLength = cfg.outputLength || 'medium';
 
     renderApiStatus();
     renderGenreTabs();
     renderHeroSpotlight();
+    renderContinuePlaying();
     renderHomeCatalog();
     renderAnimeHub();
     renderSidebarSessions();
@@ -140,7 +234,45 @@ function bindStaticEvents() {
     switchView('creator');
   });
   $('#goToAnimeHubBtn').addEventListener('click', () => switchView('anime'));
+  $('#goToChatsFromHomeBtn')?.addEventListener('click', () => switchView('chats'));
   $('#chatsExploreBtn').addEventListener('click', () => switchView('home'));
+
+  // Home Trending Hashtags Quick Explorer
+  $$('#homeQuickTags .quick-tag-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tag = btn.dataset.qtag || '';
+      const searchEl = $('#globalSearchInput');
+      if (state.searchQuery === tag.toLowerCase()) {
+        state.searchQuery = '';
+        searchEl.value = '';
+      } else {
+        state.searchQuery = tag.toLowerCase();
+        searchEl.value = tag;
+      }
+      $$('#homeQuickTags .quick-tag-btn').forEach((b) =>
+        b.classList.toggle('active', state.searchQuery === (b.dataset.qtag || '').toLowerCase())
+      );
+      if (state.view !== 'home') switchView('home');
+      renderHomeCatalog();
+    });
+  });
+
+  // Global Escape key closes open modals or inspector drawer
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    let closedAny = false;
+    $$('.modal-backdrop').forEach((m) => {
+      if (!m.hidden) {
+        m.hidden = true;
+        closedAny = true;
+      }
+    });
+    if (!closedAny && $('#inspectorDrawer')?.classList.contains('open')) {
+      $('#inspectorDrawer').classList.remove('open');
+      const backdrop = $('#inspectorBackdrop');
+      if (backdrop) backdrop.hidden = true;
+    }
+  });
 
   // Anime Hub Controls
   $('#summonAnimeBtn').addEventListener('click', handleSummonAnime);
@@ -203,6 +335,9 @@ function bindStaticEvents() {
   // Search & Sort
   $('#globalSearchInput').addEventListener('input', (e) => {
     state.searchQuery = e.target.value.trim().toLowerCase();
+    $$('#homeQuickTags .quick-tag-btn').forEach((b) =>
+      b.classList.toggle('active', Boolean(state.searchQuery) && state.searchQuery === (b.dataset.qtag || '').toLowerCase())
+    );
     if (state.view === 'anime') {
       renderAnimeHub();
     } else {
@@ -267,6 +402,7 @@ function bindStaticEvents() {
 
   // Chat Header & Controls
   $('#chatBackBtn').addEventListener('click', () => {
+    stopSpeech();
     if (state.isStreaming && state.abortController) state.abortController.abort();
     switchView('home');
   });
@@ -277,9 +413,36 @@ function bindStaticEvents() {
     });
   });
 
-  $('#chatAiModeSelect').addEventListener('change', (e) => {
-    state.aiMode = e.target.value;
-    api.updateConfig({ defaultMode: state.aiMode }).catch(() => {});
+  const syncAiMode = (mode) => {
+    state.aiMode = mode;
+    if ($('#chatAiModeSelect')) $('#chatAiModeSelect').value = mode;
+    if ($('#inspAiModeSelect')) $('#inspAiModeSelect').value = mode;
+    api.updateConfig({ defaultMode: mode }).catch(() => {});
+  };
+  $('#chatAiModeSelect').addEventListener('change', (e) => syncAiMode(e.target.value));
+  $('#inspAiModeSelect')?.addEventListener('change', (e) => {
+    syncAiMode(e.target.value);
+    showToast('AI 생성 모드가 변경되었습니다.');
+  });
+
+  // 1-Tap RP Format Chips (*행동*, "대사", (지시))
+  $('#fmtActionBtn')?.addEventListener('click', () => insertComposerFormat('*', '*'));
+  $('#fmtDialogueBtn')?.addEventListener('click', () => insertComposerFormat('"', '"'));
+  $('#fmtOocBtn')?.addEventListener('click', () => insertComposerFormat('((연출 지시: ', '))'));
+
+  // 《국가의 시대》 1-Tap Executive Policy Command Bar
+  $$('#nationQuickCmdBar .nation-cmd-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const cmd = btn.dataset.ncmd || '';
+      if (!cmd) return;
+      if (state.isStreaming) {
+        showToast('현재 AI 응답을 생성 중입니다. 잠시만 기다려 주세요.');
+        return;
+      }
+      $('#suggestionsTray').hidden = true;
+      $('#toggleSuggestionsBtn').classList.remove('active');
+      triggerChatStream({ action: 'send', text: cmd });
+    });
   });
 
   const setInspectorOpen = (open) => {
@@ -418,6 +581,18 @@ function bindStaticEvents() {
     });
   });
 
+  $$('#fontSizeToggle .seg-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setFontSize(btn.dataset.fsize);
+    });
+  });
+
+  $$('#backdropToggle .seg-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setBackdropMode(btn.dataset.bmode);
+    });
+  });
+
   $('#newSessionSameCharBtn').addEventListener('click', () => {
     if (state.activeCharacter) startNewStory(state.activeCharacter.id);
   });
@@ -480,6 +655,7 @@ function autoResizeTextarea(el) {
 }
 
 function switchView(target) {
+  if (target !== 'chat') stopSpeech();
   state.view = target;
   $$('.view').forEach((v) => v.classList.remove('active'));
   $(`#view-${target}`).classList.add('active');
@@ -492,6 +668,7 @@ function switchView(target) {
   $('#globalTopbar').classList.toggle('hidden', isChat);
   $('#mobileTabbar').classList.toggle('hidden', isChat);
 
+  if (target === 'home') renderContinuePlaying();
   if (target === 'anime') renderAnimeHub();
   if (target === 'chats') renderChatsView();
   if (target === 'library') renderLibraryView();
@@ -508,7 +685,7 @@ function renderApiStatus() {
   const cfg = state.config;
   if (!cfg) return;
   const connected = cfg.hasApiKey;
-  const modelLabel = cfg.defaultModel || 'gemini-3.8-flash';
+  const modelLabel = cfg.defaultModel || 'gemini-3.5-flash-lite';
 
   $('#apiStatusDot').classList.toggle('connected', connected);
   $('#apiStatusTitle').textContent = connected ? modelLabel : 'Gemini 무료 API 연결';
@@ -528,6 +705,18 @@ function openSettingsModal() {
   const cfg = state.config;
   if (!cfg) return;
 
+  const runtimeBadge = $('#settingsRuntimeBadge');
+  if (runtimeBadge) {
+    const host = window.location.hostname || '';
+    if (state.runtimeMode === 'local') {
+      runtimeBadge.textContent = '💻 Mac 로컬 서버';
+    } else if (host.endsWith('.github.io')) {
+      runtimeBadge.textContent = '☁️ GitHub Pages · Google 직통';
+    } else {
+      runtimeBadge.textContent = '☁️ 24/7 클라우드 · Google 직통';
+    }
+  }
+
   $('#settingsApiKeyInput').value = '';
   $('#settingsApiKeyInput').placeholder = cfg.hasApiKey
     ? `현재 저장됨: ${cfg.maskedApiKey} (새 키 입력 시 덮어쓰기)`
@@ -537,7 +726,7 @@ function openSettingsModal() {
   modelSel.innerHTML = cfg.models
     .map((m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)} — ${escapeHtml(m.badge)}</option>`)
     .join('');
-  modelSel.value = cfg.defaultModel || 'gemini-3.8-flash';
+  modelSel.value = cfg.defaultModel || 'gemini-3.5-flash-lite';
   $('#settingsModeSelect').value = cfg.defaultMode || 'story';
 
   $('#modelCardsInfo').innerHTML = cfg.models
@@ -573,21 +762,23 @@ async function handleVerifyApiKey() {
   statusEl.className = 'verify-status';
   statusEl.textContent = 'Google Gemini API와 통신 중입니다...';
 
+  const t0 = performance.now();
   try {
     const res = await api.verifyGemini({
       apiKey: keyInput || undefined,
       save: Boolean(keyInput),
       autoSelectRecommended: true,
     });
+    const sec = ((performance.now() - t0) / 1000).toFixed(1);
     state.config = res.config;
     renderApiStatus();
     $('#settingsModelSelect').value = state.config.defaultModel;
     statusEl.className = 'verify-status ok';
-    statusEl.textContent = `✅ 연결 성공! 사용 가능 모델 ${res.models.length}개 확인 · 최고 무료 모델(${res.recommendedModel}) 자동 선택됨`;
-    showToast('Google Gemini 무료 API가 성공적으로 연결되었습니다!');
+    statusEl.textContent = `✅ 연결 성공! (${sec}초 · 사용 가능 모델 ${res.models.length}개 · ${res.recommendedModel} 자동 선택)`;
+    showToast(`Google Gemini API 연결 성공! (${sec}초)`);
   } catch (err) {
     statusEl.className = 'verify-status err';
-    statusEl.textContent = `❌ ${err.message}`;
+    statusEl.textContent = `❌ ${humanizeError(err)}`;
   } finally {
     btn.disabled = false;
     btn.textContent = '연결 테스트 & 저장';
@@ -618,14 +809,15 @@ async function handleSaveSettings() {
     state.config = await api.updateConfig(patch);
     state.aiMode = state.config.defaultMode;
     $('#chatAiModeSelect').value = state.aiMode;
+    if ($('#inspAiModeSelect')) $('#inspAiModeSelect').value = state.aiMode;
     renderApiStatus();
     closeModal('settingsModal');
     showToast(keyInput ? '✅ Gemini API 키가 검증되어 안전하게 저장되었습니다!' : '설정이 저장되었습니다.');
   } catch (err) {
     const statusEl = $('#verifyStatusMsg');
     statusEl.className = 'verify-status err';
-    statusEl.textContent = `❌ ${err.message}`;
-    showToast(err.message, 'error');
+    statusEl.textContent = `❌ ${humanizeError(err)}`;
+    showToast(humanizeError(err), 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = '설정 저장';
@@ -720,15 +912,19 @@ function getFeaturedCharacters() {
 function renderHeroSpotlight() {
   const featured = getFeaturedCharacters();
   if (featured.length === 0) return;
-  const current = featured[state.heroIndex % featured.length];
+  const idxSafe = ((state.heroIndex % featured.length) + featured.length) % featured.length;
+  const current = featured[idxSafe];
+  const heroEl = $('#heroSpotlight');
 
-  $('#heroSpotlight').innerHTML = `
+  heroEl.innerHTML = `
     <div class="hero-bg" style="background-image:url('${escapeHtml(current.avatar)}')"></div>
     <div class="hero-overlay"></div>
+    <button type="button" class="hero-nav-btn prev" id="heroPrevBtn" aria-label="이전 추천">‹</button>
+    <button type="button" class="hero-nav-btn next" id="heroNextBtn" aria-label="다음 추천">›</button>
     <div class="hero-inner">
       <div class="hero-copy">
         <div class="hero-badges">
-          <span class="badge-original">${current.isAnime ? `🎬 ANIME · ${escapeHtml(current.animeTitle || '')}` : '✦ CRACK ORIGINAL'}</span>
+          <span class="badge-original">${current.isNationSim ? '🏛️ CRACK FLAGSHIP · 국가 시뮬' : current.isAnime ? `🎬 ANIME · ${escapeHtml(current.animeTitle || '')}` : '✦ CRACK ORIGINAL'}</span>
           <span class="badge-genre">${current.isAnime ? (current.playStyle === 'world' ? '🌍 멀티캐릭 세계관 시뮬' : '👤 1:1 캐릭터 챗') : escapeHtml(current.genreLabel)}</span>
           <span class="badge-genre">🔥 ${formatKoreanCount(current.plays)} 대화</span>
         </div>
@@ -738,7 +934,7 @@ function renderHeroSpotlight() {
           ${(current.tags || []).map((t) => `<span class="tag-chip">${escapeHtml(t)}</span>`).join('')}
         </div>
         <div class="hero-actions">
-          <button class="primary-btn" id="heroStartBtn">✦ ${escapeHtml(current.name)}와 이야기 시작하기</button>
+          <button class="primary-btn" id="heroStartBtn">✦ ${escapeHtml(current.name)} 시작하기</button>
           <button class="secondary-btn" id="heroDetailBtn">작품 정보 보기</button>
         </div>
       </div>
@@ -749,7 +945,7 @@ function renderHeroSpotlight() {
     <div class="hero-dots">
       ${featured
         .map(
-          (_, idx) => `<button class="hero-dot ${idx === state.heroIndex % featured.length ? 'active' : ''}" data-hidx="${idx}" aria-label="배너 ${idx + 1}"></button>`
+          (_, idx) => `<button class="hero-dot ${idx === idxSafe ? 'active' : ''}" data-hidx="${idx}" aria-label="배너 ${idx + 1}"></button>`
         )
         .join('')}
     </div>
@@ -757,11 +953,72 @@ function renderHeroSpotlight() {
 
   $('#heroStartBtn').addEventListener('click', () => openOrStartCharacter(current.id));
   $('#heroDetailBtn').addEventListener('click', () => openCharDetailModal(current.id));
+  $('#heroPrevBtn').addEventListener('click', () => {
+    state.heroIndex = (idxSafe - 1 + featured.length) % featured.length;
+    renderHeroSpotlight();
+  });
+  $('#heroNextBtn').addEventListener('click', () => {
+    state.heroIndex = (idxSafe + 1) % featured.length;
+    renderHeroSpotlight();
+  });
   $$('.hero-dot').forEach((dot) => {
     dot.addEventListener('click', () => {
       state.heroIndex = Number(dot.dataset.hidx);
       renderHeroSpotlight();
     });
+  });
+
+  if (!heroEl.dataset.swipeBound) {
+    heroEl.dataset.swipeBound = '1';
+    let touchStartX = 0;
+    heroEl.addEventListener('touchstart', (e) => {
+      touchStartX = e.changedTouches?.[0]?.clientX || 0;
+    }, { passive: true });
+    heroEl.addEventListener('touchend', (e) => {
+      const dx = (e.changedTouches?.[0]?.clientX || 0) - touchStartX;
+      if (Math.abs(dx) < 42) return;
+      const list = getFeaturedCharacters();
+      if (list.length <= 1) return;
+      state.heroIndex = dx < 0
+        ? (state.heroIndex + 1) % list.length
+        : (state.heroIndex - 1 + list.length) % list.length;
+      renderHeroSpotlight();
+    }, { passive: true });
+  }
+}
+
+function renderContinuePlaying() {
+  const section = $('#continuePlayingSection');
+  const strip = $('#continuePlayingStrip');
+  if (!section || !strip) return;
+  const shouldShow = state.sessions.length > 0 && state.activeGenre === 'all' && !state.searchQuery;
+  section.hidden = !shouldShow;
+  if (!shouldShow) return;
+
+  strip.innerHTML = state.sessions
+    .slice(0, 6)
+    .map(
+      (s) => `
+      <button type="button" class="continue-card" data-csid="${s.id}">
+        <img src="${escapeHtml(s.characterAvatar)}" alt="${escapeHtml(s.characterName)}" loading="lazy" />
+        <div class="continue-meta">
+          <div class="continue-top">
+            <strong>${escapeHtml(s.characterName)}</strong>
+            <span class="continue-time">${formatRelativeTime(s.updatedAt)}</span>
+          </div>
+          <div class="continue-preview">${escapeHtml(s.lastPreview || s.mood || '이야기 이어하기')}</div>
+          <div class="continue-foot">
+            <span>♥ ${s.affinity}</span>
+            <span>💬 ${s.messageCount}턴</span>
+            <span class="continue-cta">이어하기 →</span>
+          </div>
+        </div>
+      </button>`
+    )
+    .join('');
+
+  strip.querySelectorAll('[data-csid]').forEach((btn) => {
+    btn.addEventListener('click', () => openSession(btn.dataset.csid));
   });
 }
 
@@ -777,6 +1034,7 @@ function startHeroRotation() {
 }
 
 function renderHomeCatalog() {
+  renderContinuePlaying();
   // Ranking TOP 4
   const top4 = [...state.characters].sort((a, b) => (b.plays || 0) - (a.plays || 0)).slice(0, 4);
   const showRanking = state.activeGenre === 'all' && !state.searchQuery;
@@ -909,8 +1167,11 @@ function characterCardHtml(c) {
           ${(c.tags || []).slice(0, 3).map((t) => `<span>${escapeHtml(t)}</span>`).join('')}
         </div>
         <div class="char-card-footer">
-          <span>💬 ${formatKoreanCount(c.plays)}</span>
-          <span>♥ ${formatKoreanCount(c.likes)}</span>
+          <div class="char-card-stats">
+            <span>💬 ${formatKoreanCount(c.plays)}</span>
+            <span>♥ ${formatKoreanCount(c.likes)}</span>
+          </div>
+          <button type="button" class="card-quick-chat-btn" data-quick-chat="${c.id}" title="바로 대화 시작">대화 →</button>
         </div>
       </div>
     </article>`;
@@ -1055,8 +1316,15 @@ function renderCharacterGrid(container, list, { emptyTitle, emptySub }) {
 
   container.querySelectorAll('.char-card').forEach((card) => {
     card.addEventListener('click', (e) => {
-      if (e.target.closest('[data-fav-id]')) return;
+      if (e.target.closest('[data-fav-id]') || e.target.closest('[data-quick-chat]')) return;
       openCharDetailModal(card.dataset.charId);
+    });
+  });
+
+  container.querySelectorAll('[data-quick-chat]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openOrStartCharacter(btn.dataset.quickChat);
     });
   });
 
@@ -1191,6 +1459,7 @@ async function reloadSessions() {
   const data = await api.getSessions();
   state.sessions = data.sessions || [];
   renderSidebarSessions();
+  renderContinuePlaying();
   renderChatsView();
   if (state.activeCharacter) renderSameCharSessions();
 }
@@ -1287,10 +1556,12 @@ async function openSession(sessionId) {
 }
 
 function enterChatRoom(session, character, persona) {
+  stopSpeech();
   state.activeSession = session;
   state.activeCharacter = character;
   state.activePersona = persona || state.personas[0];
   state.editingMsgId = null;
+  state.lastAutoSummaryCount = session.messages?.length || 0;
 
   $('#chatBackdrop').style.backgroundImage = `url('${character.avatar}')`;
   $('#chatCharAvatar').src = character.avatar;
@@ -1300,7 +1571,10 @@ function enterChatRoom(session, character, persona) {
   // Sync controls
   setViewMode(state.viewMode, false);
   setFontFamily(state.fontFamily, false);
+  setFontSize(state.fontSize, false);
+  setBackdropMode(state.backdropMode, false);
   $('#chatAiModeSelect').value = state.aiMode;
+  if ($('#inspAiModeSelect')) $('#inspAiModeSelect').value = state.aiMode;
   $$('#lengthPills .len-pill').forEach((b) => b.classList.toggle('active', b.dataset.len === state.outputLength));
 
   updateChatHeaderHud();
@@ -1328,7 +1602,23 @@ function setFontFamily(font, persist = true) {
   if (persist) api.updateConfig({ fontFamily: state.fontFamily }).catch(() => {});
 }
 
-function updateChatHeaderHud() {
+function setFontSize(size, persist = true) {
+  state.fontSize = ['sm', 'md', 'lg'].includes(size) ? size : 'md';
+  $$('#fontSizeToggle .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.fsize === state.fontSize));
+  const inner = $('#messagesInner');
+  inner.classList.remove('font-sm', 'font-md', 'font-lg');
+  inner.classList.add(`font-${state.fontSize}`);
+  if (persist) api.updateConfig({ fontSize: state.fontSize }).catch(() => {});
+}
+
+function setBackdropMode(mode, persist = true) {
+  state.backdropMode = mode === 'vivid' ? 'vivid' : 'dim';
+  $$('#backdropToggle .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.bmode === state.backdropMode));
+  $('#chatBackdrop')?.classList.toggle('vivid', state.backdropMode === 'vivid');
+  if (persist) api.updateConfig({ backdropMode: state.backdropMode }).catch(() => {});
+}
+
+function updateChatHeaderHud(affinityDelta = 0) {
   const s = state.activeSession;
   const c = state.activeCharacter;
   if (!s) return;
@@ -1337,6 +1627,13 @@ function updateChatHeaderHud() {
   $('#chatAffinityFill').style.width = `${aff}%`;
   $('#chatAffinityVal').textContent = String(aff);
   $('#chatAffinityStage').textContent = s.relationshipStage || '';
+
+  if (affinityDelta !== 0) {
+    const row = $('#chatAffinityRow');
+    row?.classList.remove('pulse');
+    void row?.offsetWidth;
+    row?.classList.add('pulse');
+  }
 
   $('#inspAffinityRange').value = aff;
   $('#inspAffinityValue').textContent = `${aff} / 100`;
@@ -1347,8 +1644,11 @@ function updateChatHeaderHud() {
 
 function renderNationHud(character, session) {
   const bar = $('#nationHudBar');
+  const cmdBar = $('#nationQuickCmdBar');
+  const isNation = Boolean(character?.isNationSim);
+  if (cmdBar) cmdBar.hidden = !isNation;
   if (!bar) return;
-  if (!character?.isNationSim) {
+  if (!isNation) {
     bar.hidden = true;
     return;
   }
@@ -1361,7 +1661,9 @@ function renderNationHud(character, session) {
     military: 65,
     stability: 68,
   };
-  const approvalClass = ns.approval <= 30 ? 'danger' : ns.approval >= 75 ? 'good' : '';
+  const approvalNum = Number(ns.approval ?? 58);
+  const approvalClass = approvalNum <= 30 ? 'danger' : approvalNum >= 75 ? 'good' : '';
+  const statusTag = approvalNum <= 30 ? '<span class="nation-chip danger">🚨 탄핵 위기</span>' : approvalNum >= 75 ? '<span class="nation-chip good">👑 태평성대</span>' : '';
   bar.hidden = false;
   bar.innerHTML = `
     <span class="nation-chip gold">🏛️ ${escapeHtml(ns.name || '국가')}</span>
@@ -1371,6 +1673,7 @@ function renderNationHud(character, session) {
     <span class="nation-chip ${approvalClass}">📊 지지율 ${escapeHtml(String(ns.approval ?? 58))}%</span>
     <span class="nation-chip">⚔️ 군사 ${escapeHtml(String(ns.military ?? 65))}</span>
     <span class="nation-chip">⚖️ 안정 ${escapeHtml(String(ns.stability ?? 68))}</span>
+    ${statusTag}
   `;
 }
 
@@ -1486,76 +1789,115 @@ function renderMessages() {
 
   const userName = state.activePersona?.name || '나';
 
-  inner.innerHTML = s.messages
-    .map((m, idx) => {
-      const isUser = m.role === 'user';
-      const isLastModel = !isUser && idx === s.messages.length - 1;
-      const versions = Array.isArray(m.versions) ? m.versions : [m.content];
-      const activeVer = m.activeVersion || 0;
-      const triggered = m.meta?.triggeredLorebooks || [];
-      const delta = m.meta?.affinityDelta || 0;
+  // Immersive Scene Intro Spotlight Banner at the top of the story
+  const modePill = c.isNationSim
+    ? `<span class="scene-pill gold">${s.nationMode === 'surreal' ? '🌀 초현실 변수' : '🏛️ 정통 리얼리티'}</span>`
+    : c.isAnime
+      ? `<span class="scene-pill anime">🎬 ${escapeHtml(c.animeTitle || 'ANIME')} · ${s.storyRoute === 'canon' ? '원작 고증' : 'IF 전개'}</span>`
+      : `<span class="scene-pill">${escapeHtml(c.genreLabel || '스토리')}</span>`;
 
-      const isEditing = state.editingMsgId === m.id;
-      const bodyHtml = isEditing
-        ? `<div class="inline-edit-box">
-             <textarea id="inlineEditArea">${escapeHtml(m.content)}</textarea>
-             <div class="inline-edit-actions">
-               <button class="tiny-ghost-btn" data-edit-cancel>취소</button>
-               <button class="tiny-accent-btn" data-edit-save="${m.id}">저장</button>
-             </div>
-           </div>`
-        : `<div class="msg-content">${formatStoryHtml(m.content)}</div>`;
+  const sceneBannerHtml = `
+    <div class="chat-scene-banner" id="chatSceneBanner">
+      <button type="button" class="scene-portrait-btn" id="scenePortraitBtn" title="캐릭터 상세 보기">
+        <img src="${escapeHtml(c.avatar)}" alt="${escapeHtml(c.name)}" />
+      </button>
+      <div class="scene-banner-copy">
+        <div class="scene-banner-top">
+          ${modePill}
+          <span class="scene-pill">📖 로어북 ${(s.lorebook || []).length}개</span>
+          <span class="scene-pill">💬 ${s.messages.length}턴</span>
+        </div>
+        <div class="scene-banner-title">${escapeHtml(c.title)}</div>
+        <div class="scene-banner-world">${escapeHtml(c.worldSummary || c.subtitle || '')}</div>
+      </div>
+    </div>
+  `;
 
-      return `
-        <article class="msg-turn ${isUser ? 'role-user' : 'role-model'}" data-msg-id="${m.id}">
-          <div class="msg-speaker-row">
-            ${!isUser ? `<img class="msg-speaker-avatar" src="${escapeHtml(c.avatar)}" alt="" />` : ''}
-            <span class="msg-speaker-name">${escapeHtml(isUser ? userName : c.name)}</span>
+  inner.innerHTML =
+    sceneBannerHtml +
+    s.messages
+      .map((m, idx) => {
+        const isUser = m.role === 'user';
+        const isLastModel = !isUser && idx === s.messages.length - 1;
+        const versions = Array.isArray(m.versions) ? m.versions : [m.content];
+        const activeVer = m.activeVersion || 0;
+        const triggered = m.meta?.triggeredLorebooks || [];
+        const delta = m.meta?.affinityDelta || 0;
+        const isSpeaking = state.speakingMsgId === m.id;
+
+        const isEditing = state.editingMsgId === m.id;
+        const bodyHtml = isEditing
+          ? `<div class="inline-edit-box">
+               <textarea id="inlineEditArea">${escapeHtml(m.content)}</textarea>
+               <div class="inline-edit-actions">
+                 <button class="tiny-ghost-btn" data-edit-cancel>취소</button>
+                 <button class="tiny-accent-btn" data-edit-save="${m.id}">저장</button>
+               </div>
+             </div>`
+          : `<div class="msg-content">${formatStoryHtml(m.content)}</div>`;
+
+        return `
+          <article class="msg-turn ${isUser ? 'role-user' : 'role-model'}" data-msg-id="${m.id}">
+            <div class="msg-speaker-row">
+              ${!isUser ? `<img class="msg-speaker-avatar" src="${escapeHtml(c.avatar)}" alt="" />` : ''}
+              <span class="msg-speaker-name">${escapeHtml(isUser ? userName : c.name)}</span>
+              ${
+                !isUser && m.meta?.model && m.meta.model !== 'opening'
+                  ? `<span class="msg-model-badge">${m.meta.isDemo ? '미리보기' : escapeHtml(m.meta.model)}</span>`
+                  : ''
+              }
+              ${
+                !isUser && delta !== 0
+                  ? `<span class="msg-delta-badge">♥ ${delta > 0 ? `+${delta}` : delta}</span>`
+                  : ''
+              }
+            </div>
             ${
-              !isUser && m.meta?.model && m.meta.model !== 'opening'
-                ? `<span class="msg-model-badge">${m.meta.isDemo ? '미리보기' : escapeHtml(m.meta.model)}</span>`
+              triggered.length > 0
+                ? `<div class="msg-lore-strip">${triggered.map((t) => `<span class="lore-trigger-pill">📖 로어북: ${escapeHtml(t)}</span>`).join('')}</div>`
                 : ''
             }
+            ${bodyHtml}
             ${
-              !isUser && delta !== 0
-                ? `<span class="msg-delta-badge">♥ ${delta > 0 ? `+${delta}` : delta}</span>`
+              !isEditing
+                ? `<div class="msg-actions">
+                    ${
+                      versions.length > 1
+                        ? `<span class="version-pager">
+                             <button data-ver-prev="${m.id}" ${activeVer <= 0 ? 'disabled' : ''}>‹</button>
+                             <span>${activeVer + 1} / ${versions.length}</span>
+                             <button data-ver-next="${m.id}" ${activeVer >= versions.length - 1 ? 'disabled' : ''}>›</button>
+                           </span>`
+                        : ''
+                    }
+                    ${!isUser ? `<button class="msg-act-btn ${isSpeaking ? 'speaking' : ''}" data-act-speak="${m.id}">${isSpeaking ? '⏹ 정지' : '🔊 듣기'}</button>` : ''}
+                    ${isLastModel && !m.isOpening ? `<button class="msg-act-btn" data-act-regen>↺ 재생성</button>` : ''}
+                    <button class="msg-act-btn" data-act-edit="${m.id}">✎ 수정</button>
+                    <button class="msg-act-btn" data-act-copy="${m.id}">📋 복사</button>
+                    ${idx < s.messages.length - 1 ? `<button class="msg-act-btn" data-act-rewind="${m.id}">⏪ 되돌리기</button>` : ''}
+                  </div>`
                 : ''
             }
-          </div>
-          ${
-            triggered.length > 0
-              ? `<div class="msg-lore-strip">${triggered.map((t) => `<span class="lore-trigger-pill">📖 로어북: ${escapeHtml(t)}</span>`).join('')}</div>`
-              : ''
-          }
-          ${bodyHtml}
-          ${
-            !isEditing
-              ? `<div class="msg-actions">
-                  ${
-                    versions.length > 1
-                      ? `<span class="version-pager">
-                           <button data-ver-prev="${m.id}" ${activeVer <= 0 ? 'disabled' : ''}>‹</button>
-                           <span>${activeVer + 1} / ${versions.length}</span>
-                           <button data-ver-next="${m.id}" ${activeVer >= versions.length - 1 ? 'disabled' : ''}>›</button>
-                         </span>`
-                      : ''
-                  }
-                  ${isLastModel && !m.isOpening ? `<button class="msg-act-btn" data-act-regen>↺ 재생성</button>` : ''}
-                  <button class="msg-act-btn" data-act-edit="${m.id}">✎ 수정</button>
-                  <button class="msg-act-btn" data-act-copy="${m.id}">📋 복사</button>
-                  ${idx < s.messages.length - 1 ? `<button class="msg-act-btn" data-act-rewind="${m.id}">⏪ 여기로 되돌리기</button>` : ''}
-                </div>`
-              : ''
-          }
-        </article>`;
-    })
-    .join('');
+          </article>`;
+      })
+      .join('');
+
+  $('#scenePortraitBtn')?.addEventListener('click', () => {
+    if (state.activeCharacter) openCharDetailModal(state.activeCharacter.id);
+  });
 
   bindMessageActionHandlers();
 }
 
 function bindMessageActionHandlers() {
   const inner = $('#messagesInner');
+
+  inner.querySelectorAll('[data-act-speak]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const msg = state.activeSession?.messages.find((m) => m.id === btn.dataset.actSpeak);
+      if (msg) toggleSpeakMessage(msg.id, msg.content, btn);
+    });
+  });
 
   inner.querySelectorAll('[data-act-edit]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -1662,6 +2004,7 @@ function handleSendOrStop() {
 
 async function triggerChatStream({ action, text = '' }) {
   if (!state.activeSession || state.isStreaming) return;
+  stopSpeech();
 
   state.isStreaming = true;
   state.abortController = new AbortController();
@@ -1671,10 +2014,13 @@ async function triggerChatStream({ action, text = '' }) {
   const inner = $('#messagesInner');
   const c = state.activeCharacter;
   const userName = state.activePersona?.name || '나';
+  const sessionIdAtStart = state.activeSession.id;
+  const prevMsgCount = state.activeSession.messages?.length || 0;
 
   // Optimistically render user bubble if action === 'send'
+  let tempUser = null;
   if (action === 'send') {
-    const tempUser = document.createElement('article');
+    tempUser = document.createElement('article');
     tempUser.className = 'msg-turn role-user';
     tempUser.innerHTML = `
       <div class="msg-speaker-row"><span class="msg-speaker-name">${escapeHtml(userName)}</span></div>
@@ -1693,7 +2039,7 @@ async function triggerChatStream({ action, text = '' }) {
     <div class="msg-speaker-row">
       <img class="msg-speaker-avatar" src="${escapeHtml(c.avatar)}" alt="" />
       <span class="msg-speaker-name">${escapeHtml(c.name)}</span>
-      <span class="msg-model-badge" id="streamingBadge">생성 중...</span>
+      <span class="msg-model-badge" id="streamingBadge">연결 중...</span>
     </div>
     <div class="msg-lore-strip" id="streamingLore"></div>
     <div class="msg-content" id="streamingContent"><span class="streaming-cursor"></span></div>
@@ -1702,18 +2048,76 @@ async function triggerChatStream({ action, text = '' }) {
   scrollToBottom();
 
   let accumulated = '';
+  let receivedAnyDelta = false;
+  let errorRendered = false;
   const contentEl = streamCard.querySelector('#streamingContent');
   const loreEl = streamCard.querySelector('#streamingLore');
   const badgeEl = streamCard.querySelector('#streamingBadge');
 
+  const slowHintTimer = setTimeout(() => {
+    if (!receivedAnyDelta && !errorRendered && badgeEl) {
+      badgeEl.textContent = '빠른 모델 탐색 중...';
+    }
+  }, 3800);
+
+  const renderStreamError = async (err) => {
+    errorRendered = true;
+    clearTimeout(slowHintTimer);
+    const rawMsg = err?.message || 'AI 응답 오류';
+    const friendlyMsg = humanizeError(rawMsg);
+    const isKeyErr = err?.code === 'INVALID_API_KEY' || /API key|API 키|유효하지/i.test(rawMsg);
+
+    // Check if user's message was persisted; if not, restore it into input so user never loses text!
+    let userMsgPersisted = false;
+    try {
+      const check = await api.getSession(sessionIdAtStart);
+      state.activeSession = check.session;
+      userMsgPersisted = (check.session.messages?.length || 0) > prevMsgCount;
+    } catch {
+      // ignore
+    }
+    if (action === 'send' && !userMsgPersisted && text) {
+      if (tempUser) tempUser.remove();
+      const input = $('#chatInput');
+      if (input && !input.value.trim()) {
+        input.value = text;
+        autoResizeTextarea(input);
+      }
+    }
+
+    streamCard.innerHTML = `
+      <div class="stream-error-card">
+        <div><strong>⚠️ AI 응답 생성 실패</strong><br />${escapeHtml(friendlyMsg)}</div>
+        <div class="stream-error-actions">
+          ${isKeyErr ? '<button type="button" class="primary-btn small" data-err-open-api>🔑 무료 API 키 다시 입력</button>' : '<button type="button" class="ghost-btn small" data-err-open-api>🔑 API 설정 확인</button>'}
+          <button type="button" class="secondary-btn small" data-err-retry>↺ 다시 시도</button>
+        </div>
+      </div>
+    `;
+    streamCard.querySelector('[data-err-open-api]')?.addEventListener('click', openSettingsModal);
+    streamCard.querySelector('[data-err-retry]')?.addEventListener('click', () => {
+      streamCard.remove();
+      if (action === 'send' && !userMsgPersisted && text) {
+        $('#chatInput').value = '';
+        autoResizeTextarea($('#chatInput'));
+        triggerChatStream({ action: 'send', text });
+      } else {
+        triggerChatStream({ action: action === 'send' ? 'continue' : action });
+      }
+    });
+    scrollToBottom(true);
+    showToast(friendlyMsg, 'error');
+  };
+
   try {
+    const selectedModel = resolveModelForMode(state.aiMode);
     await api.streamChat(
-      state.activeSession.id,
+      sessionIdAtStart,
       {
         action,
         text,
         mode: state.aiMode,
-        model: state.aiMode === 'speed' ? 'gemini-3.5-flash-lite' : state.config?.defaultModel,
+        model: selectedModel,
         outputLength: state.outputLength,
         viewMode: state.viewMode,
       },
@@ -1725,57 +2129,65 @@ async function triggerChatStream({ action, text = '' }) {
               .map((l) => `<span class="lore-trigger-pill">📖 로어북: ${escapeHtml(l.title)}</span>`)
               .join('');
           }
-          badgeEl.textContent = meta.isDemo ? '미리보기 응답 중' : 'Gemini 스트리밍 중';
+          badgeEl.textContent = meta.isDemo ? '미리보기 응답 중' : 'Gemini 응답 대기 중...';
         },
         onDelta: ({ text: chunk }) => {
+          if (!receivedAnyDelta) {
+            receivedAnyDelta = true;
+            clearTimeout(slowHintTimer);
+            badgeEl.textContent = 'Gemini 스트리밍 중';
+          }
           accumulated += chunk;
           contentEl.innerHTML = `${formatStoryHtml(accumulated)}<span class="streaming-cursor"></span>`;
           scrollToBottom(true);
         },
         onDone: async (donePayload) => {
+          clearTimeout(slowHintTimer);
           if (donePayload.fallbackFrom) {
-            showToast(`${donePayload.fallbackFrom} 한도 초과 → ${donePayload.modelUsed}로 자동 전환되었습니다.`);
+            showToast(`${donePayload.fallbackFrom} 혼잡/지연 → ${donePayload.modelUsed}로 자동 전환되었습니다.`);
           }
-          const refreshed = await api.getSession(state.activeSession.id);
+          const delta = donePayload.message?.meta?.affinityDelta || 0;
+          const refreshed = await api.getSession(sessionIdAtStart);
           state.activeSession = refreshed.session;
-          updateChatHeaderHud();
+          updateChatHeaderHud(delta);
           renderMessages();
           scrollToBottom(true);
           reloadSessions();
+
+          // Silent background auto-summary memory refresh every 10 turns in live Gemini mode
+          const msgCount = refreshed.session.messages?.length || 0;
+          if (!donePayload.isDemo && msgCount >= 10 && msgCount % 10 === 0 && msgCount !== state.lastAutoSummaryCount) {
+            state.lastAutoSummaryCount = msgCount;
+            api.summarizeSession(sessionIdAtStart)
+              .then((sumRes) => {
+                if (state.activeSession?.id === sessionIdAtStart && sumRes.summaryMemory) {
+                  state.activeSession.summaryMemory = sumRes.summaryMemory;
+                  if ($('#sessionSummaryInput')) $('#sessionSummaryInput').value = sumRes.summaryMemory;
+                  showToast('🧠 장기 요약 메모리가 자동으로 갱신되었어요!');
+                }
+              })
+              .catch(() => {});
+          }
         },
         onError: (err) => {
-          const msg = err?.message || 'AI 응답 오류';
-          const isKeyErr = err?.code === 'INVALID_API_KEY' || /API key|API 키|유효하지/i.test(msg);
-          streamCard.innerHTML = `
-            <div class="stream-error-card">
-              <div><strong>⚠️ AI 응답 생성 실패</strong><br />${escapeHtml(msg)}</div>
-              <div class="stream-error-actions">
-                ${isKeyErr ? '<button type="button" class="primary-btn small" data-err-open-api>🔑 무료 API 키 다시 입력</button>' : ''}
-                <button type="button" class="secondary-btn small" data-err-retry>↺ 다시 시도</button>
-              </div>
-            </div>
-          `;
-          streamCard.querySelector('[data-err-open-api]')?.addEventListener('click', openSettingsModal);
-          streamCard.querySelector('[data-err-retry]')?.addEventListener('click', () => {
-            streamCard.remove();
-            triggerChatStream({ action: action === 'send' ? 'continue' : action });
-          });
-          showToast(msg, 'error');
+          renderStreamError(err);
         },
       }
     );
   } catch (err) {
+    clearTimeout(slowHintTimer);
     if (err.name === 'AbortError') {
       showToast('응답 생성을 중지했습니다.');
-    } else {
-      showToast(err.message, 'error');
-    }
-    const refreshed = await api.getSession(state.activeSession.id).catch(() => null);
-    if (refreshed) {
-      state.activeSession = refreshed.session;
-      renderMessages();
+      const refreshed = await api.getSession(sessionIdAtStart).catch(() => null);
+      if (refreshed) {
+        state.activeSession = refreshed.session;
+        renderMessages();
+      }
+    } else if (!errorRendered) {
+      await renderStreamError(err);
     }
   } finally {
+    clearTimeout(slowHintTimer);
     state.isStreaming = false;
     state.abortController = null;
     $('#sendBtn').classList.remove('streaming');
@@ -1801,7 +2213,13 @@ function renderSuggestionsList(list) {
     return;
   }
   container.innerHTML = list
-    .map((text, idx) => `<button class="suggestion-item" data-sug-idx="${idx}">${escapeHtml(text)}</button>`)
+    .map(
+      (text, idx) => `
+      <div class="suggestion-row">
+        <button type="button" class="suggestion-item" data-sug-idx="${idx}">${escapeHtml(text)}</button>
+        <button type="button" class="suggestion-send-btn" data-sug-send="${idx}" title="바로 전송">➤</button>
+      </div>`
+    )
     .join('');
 
   container.querySelectorAll('.suggestion-item').forEach((btn) => {
@@ -1813,6 +2231,16 @@ function renderSuggestionsList(list) {
       input.focus();
       $('#suggestionsTray').hidden = true;
       $('#toggleSuggestionsBtn').classList.remove('active');
+    });
+  });
+
+  container.querySelectorAll('[data-sug-send]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const text = list[Number(btn.dataset.sugSend)];
+      if (!text || state.isStreaming) return;
+      $('#suggestionsTray').hidden = true;
+      $('#toggleSuggestionsBtn').classList.remove('active');
+      triggerChatStream({ action: 'send', text });
     });
   });
 }

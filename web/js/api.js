@@ -3,6 +3,12 @@ import { cloudBackend, setCloudRuntimeInfo } from './cloudBackend.js';
 let runtimeMode = 'detecting'; // 'local' | 'cloud'
 let detectPromise = null;
 
+function fetchWithTimeout(url, options = {}, ms = 2000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { ...options, signal: ctrl.signal }).finally(() => clearTimeout(t));
+}
+
 async function detectRuntime() {
   if (runtimeMode !== 'detecting') return runtimeMode;
   if (detectPromise) return detectPromise;
@@ -15,7 +21,7 @@ async function detectRuntime() {
       host.endsWith('.local') ||
       /^\d+\.\d+\.\d+\.\d+$/.test(host);
 
-    // On GitHub Pages (*.github.io) or file/static hosts, jump straight into pure zero-latency Static Cloud Mode
+    // On GitHub Pages (*.github.io), jump straight into zero-latency Static Cloud Mode
     if (host.endsWith('.github.io')) {
       setCloudRuntimeInfo({ hasNetlifyFunction: false, hasServerKey: false });
       runtimeMode = 'cloud';
@@ -25,7 +31,7 @@ async function detectRuntime() {
     // 1. Try Local Node Server (CrackAI.app / localhost / LAN)
     if (isLocalHost) {
       try {
-        const res = await fetch('./api/health', { cache: 'no-store', signal: AbortSignal.timeout(1500) });
+        const res = await fetchWithTimeout('./api/health', { cache: 'no-store' }, 1800);
         if (res.ok) {
           const ct = res.headers.get('content-type') || '';
           if (ct.includes('application/json')) {
@@ -44,7 +50,7 @@ async function detectRuntime() {
     // 2. Try Netlify Cloud Function health only if hosted on Netlify or custom root domain
     if (!isLocalHost) {
       try {
-        const res = await fetch('/api/cloud/health', { cache: 'no-store', signal: AbortSignal.timeout(2000) });
+        const res = await fetchWithTimeout('/api/cloud/health', { cache: 'no-store' }, 2200);
         if (res.ok) {
           const ct = res.headers.get('content-type') || '';
           if (ct.includes('application/json')) {

@@ -31,7 +31,7 @@ test('Lorebook keyword scanner activates only matching enabled entries', () => {
   assert.equal(matched[0].title, '계약서 7조');
 });
 
-test('Gemini 3.8 Flash payload uses thinkingLevel and omits deprecated temperature/topP/topK', () => {
+test('Gemini 3.8 Flash uses thinkingLevel, Flash-Lite omits thinkingConfig, and all Gemini 3.x omit deprecated sampling params', () => {
   const payload38 = buildGenerationPayload({
     modelId: 'gemini-3.8-flash',
     systemInstruction: '시스템 프롬프트',
@@ -44,6 +44,16 @@ test('Gemini 3.8 Flash payload uses thinkingLevel and omits deprecated temperatu
   assert.equal('temperature' in payload38.generationConfig, false);
   assert.equal('topP' in payload38.generationConfig, false);
   assert.equal('topK' in payload38.generationConfig, false);
+
+  // Flash-Lite omits thinkingConfig for instant ~0.8s first-token latency
+  const payloadLite = buildGenerationPayload({
+    modelId: 'gemini-3.5-flash-lite',
+    systemInstruction: '시스템',
+    contents: [{ role: 'user', parts: [{ text: '안녕' }] }],
+    thinkingLevel: 'LOW',
+  });
+  assert.equal('thinkingConfig' in payloadLite.generationConfig, false);
+  assert.equal('temperature' in payloadLite.generationConfig, false);
 
   // Legacy Gemini 2.5 fallback uses temperature instead of thinkingLevel
   const payload25 = buildGenerationPayload({
@@ -90,7 +100,10 @@ test('Streaming tag filter strips <!--CRACK_STATE:...--> across arbitrary chunk 
   assert.equal(stateUpdate.mood, '설레는 시선');
 });
 
-test('Fallback chain starts with gemini-3.8-flash and deduplicates models', () => {
+test('Fallback chain starts with requested model, prioritizes fast verified models, excludes dead 2.5-flash, and deduplicates', () => {
+  const chainDefault = buildFallbackChain();
+  assert.equal(chainDefault[0], 'gemini-3.5-flash-lite');
+  assert.equal(chainDefault.includes('gemini-2.5-flash'), false);
   const chain = buildFallbackChain('gemini-3.8-flash');
   assert.equal(chain[0], 'gemini-3.8-flash');
   assert.ok(chain.includes('gemini-3.5-flash-lite'));
@@ -227,7 +240,7 @@ test('Netlify Cloud Function handler responds to health and enforces API key che
   const healthJson = await healthRes.json();
   assert.equal(healthJson.ok, true);
   assert.equal(healthJson.runtime, 'netlify-cloud');
-  assert.equal(healthJson.defaultModel, 'gemini-3.8-flash');
+  assert.equal(healthJson.defaultModel, 'gemini-3.5-flash-lite');
 
   // Verify missing API key returns 400 cleanly
   const verifyRes = await handler(

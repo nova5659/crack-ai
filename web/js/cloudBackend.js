@@ -6,11 +6,12 @@ const STORAGE_PREFIX = 'crack_cloud_v1_';
 const STATE_TAG_REGEX = /<!--\s*CRACK_STATE\s*:\s*(\{[\s\S]*?\})\s*-->/i;
 
 const FALLBACK_MODELS = [
-  'gemini-3.8-flash',
-  'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
   'gemini-3-flash-preview',
-  'gemini-2.5-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-3.5-flash',
+  'gemini-3.8-flash',
 ];
 
 const DEFAULT_PERSONAS = [
@@ -20,11 +21,14 @@ const DEFAULT_PERSONAS = [
 ];
 
 const DEFAULT_CONFIG = {
+  configVersion: 2,
   geminiApiKey: '',
-  defaultModel: 'gemini-3.8-flash',
+  defaultModel: 'gemini-3.5-flash-lite',
   defaultMode: 'story',
   viewMode: 'novel',
   fontFamily: 'sans',
+  fontSize: 'md',
+  backdropMode: 'dim',
   outputLength: 'medium',
   showAffinityHud: true,
   activePersonaId: 'persona_default',
@@ -334,10 +338,18 @@ function pickAnimePoster(text = '', category = 'shonen') {
 
 async function ensureCatalog() {
   if (catalogCache) return catalogCache;
-  const res = await fetch('./data/catalog.json', { cache: 'no-cache' });
-  if (!res.ok) throw new Error('카탈로그 데이터를 불러올 수 없습니다.');
-  catalogCache = await res.json();
-  return catalogCache;
+  for (const url of ['./data/catalog.json', `./data/catalog.json?v=${Date.now()}`]) {
+    try {
+      const res = await fetch(url, { cache: 'no-cache' });
+      if (res.ok) {
+        catalogCache = await res.json();
+        return catalogCache;
+      }
+    } catch {
+      // retry next
+    }
+  }
+  throw new Error('카탈로그 데이터를 불러올 수 없습니다. 페이지를 새로고침해 주세요.');
 }
 
 async function discoverModelsDirect(key) {
@@ -359,7 +371,18 @@ async function discoverModelsDirect(key) {
 }
 
 function readConfigRaw() {
-  return { ...DEFAULT_CONFIG, ...readLS('config', {}) };
+  const stored = readLS('config', {});
+  const merged = { ...DEFAULT_CONFIG, ...stored };
+  if ((stored.configVersion || 1) < 2) {
+    if (merged.defaultModel === 'gemini-3.8-flash' && (merged.defaultMode || 'story') === 'story') {
+      merged.defaultModel = 'gemini-3.5-flash-lite';
+    }
+    merged.configVersion = 2;
+    if (Object.keys(stored).length > 0) {
+      try { writeLS('config', merged); } catch { /* ignore */ }
+    }
+  }
+  return merged;
 }
 
 function getEffectiveClientKey() {
@@ -374,12 +397,12 @@ function hasAnyApiKey() {
 async function callGeminiGenerate({ model = 'gemini-3.5-flash-lite', systemInstruction, prompt, maxOutputTokens = 1400, jsonMode = false }) {
   const userKey = getEffectiveClientKey();
 
-  if (cloudInfo.hasNetlifyFunction && (userKey || cloudInfo.hasServerKey)) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (userKey) headers['x-user-gemini-key'] = userKey;
+  // Only route via Netlify Function if user has NO personal key and server env key exists.
+  // When user provides their own key, connect directly to Google Gemini API (0.8s faster, 0 serverless cost, zero proxy timeout!).
+  if (!userKey && cloudInfo.hasNetlifyFunction && cloudInfo.hasServerKey) {
     const res = await fetch('/api/cloud/gemini/generate', {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, systemInstruction, prompt, maxOutputTokens, jsonMode }),
     });
     const data = await res.json().catch(() => ({}));
@@ -389,7 +412,7 @@ async function callGeminiGenerate({ model = 'gemini-3.5-flash-lite', systemInstr
 
   if (!userKey) throw new Error('Google Gemini API 키가 설정되지 않았습니다.');
 
-  // Direct CORS call to Google Gemini API (works on GitHub Pages / static hosting without backend!)
+  // Direct CORS call to Google Gemini API (works on GitHub Pages / Netlify / static hosting with 8.5s fast failover!)
   let chain = buildFallbackChain(model);
   let discovered = false;
   let lastErr = 'Gemini API 호출 실패';
@@ -397,18 +420,40 @@ async function callGeminiGenerate({ model = 'gemini-3.5-flash-lite', systemInstr
     const candidate = chain[i];
     const generationConfig = { maxOutputTokens };
     if (jsonMode) generationConfig.responseMimeType = 'application/json';
-    if (isGemini3Model(candidate)) generationConfig.thinkingConfig = { thinkingLevel: 'LOW' };
-    else generationConfig.temperature = 0.85;
+    const isLite = /lite/i.test(candidate);
+    if (isGemini3Model(candidate)) {
+      if (!isLite) generationConfig.thinkingConfig = { thinkingLevel: 'LOW' };
+    } else {
+      generationConfig.temperature = 0.85;
+    }
 
-    const res = await fetch(`${API_BASE}/models/${encodeURIComponent(candidate)}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': userKey },
-      body: JSON.stringify({
-        systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig,
-      }),
-    });
+    const attemptCtrl = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      attemptCtrl.abort();
+    }, i < chain.length - 1 ? 8500 : 22000);
+
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/models/${encodeURIComponent(candidate)}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': userKey },
+        body: JSON.stringify({
+          systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig,
+        }),
+        signal: attemptCtrl.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      lastErr = timedOut ? `[${candidate}] 응답 지연` : `네트워크 오류 (${candidate}): ${err.message}`;
+      if (i < chain.length - 1) continue;
+      throw new Error(lastErr);
+    }
+    clearTimeout(timer);
+
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       try { lastErr = JSON.parse(errText)?.error?.message || `HTTP ${res.status}`; } catch { lastErr = `HTTP ${res.status}`; }
@@ -429,7 +474,12 @@ async function callGeminiGenerate({ model = 'gemini-3.5-flash-lite', systemInstr
       throw new Error(lastErr);
     }
     const data = await res.json();
-    return { text: extractTextFromCandidate(data).trim(), modelUsed: candidate };
+    const outText = extractTextFromCandidate(data).trim();
+    if (!outText && i < chain.length - 1) {
+      lastErr = `[${candidate}] 빈 응답`;
+      continue;
+    }
+    return { text: outText, modelUsed: candidate };
   }
   throw new Error(lastErr);
 }
@@ -466,12 +516,12 @@ async function consumeGeminiSseResponse(res, onCleanDelta) {
 async function streamGeminiLive({ model, thinkingLevel, maxOutputTokens, systemInstruction, contents, onDelta, signal }) {
   const userKey = getEffectiveClientKey();
 
-  if (cloudInfo.hasNetlifyFunction && (userKey || cloudInfo.hasServerKey)) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (userKey) headers['x-user-gemini-key'] = userKey;
+  // Only route via Netlify Function if user has NO personal key and server env key exists.
+  // When user has their own API key, stream directly from Google Gemini API via CORS (faster, zero Netlify quota/timeouts!).
+  if (!userKey && cloudInfo.hasNetlifyFunction && cloudInfo.hasServerKey) {
     const res = await fetch('/api/cloud/gemini/stream', {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, thinkingLevel, maxOutputTokens, systemInstruction, contents }),
       signal,
     });
@@ -487,37 +537,66 @@ async function streamGeminiLive({ model, thinkingLevel, maxOutputTokens, systemI
     return { text: cleanText, stateUpdate, modelUsed, fallbackFrom, isDemo: false };
   }
 
-  // Direct CORS SSE stream to Google Gemini API (GitHub Pages / Static Hosting — zero backend cost!)
+  // Direct CORS SSE stream to Google Gemini API (GitHub Pages / Static Hosting — zero backend cost + 8.5s fast failover!)
   let chain = buildFallbackChain(model);
   let discovered = false;
   let lastErr = 'Gemini 스트리밍 실패';
   for (let i = 0; i < chain.length; i++) {
     const candidate = chain[i];
     const generationConfig = { maxOutputTokens };
+    const isLite = /lite/i.test(candidate);
     if (isGemini3Model(candidate)) {
-      generationConfig.thinkingConfig = { thinkingLevel: ['LOW', 'MEDIUM', 'HIGH'].includes(thinkingLevel) ? thinkingLevel : 'MEDIUM' };
+      if (!isLite && thinkingLevel && ['LOW', 'MEDIUM', 'HIGH'].includes(thinkingLevel)) {
+        generationConfig.thinkingConfig = { thinkingLevel };
+      }
     } else {
       generationConfig.temperature = 0.85;
     }
 
-    const res = await fetch(`${API_BASE}/models/${encodeURIComponent(candidate)}:streamGenerateContent?alt=sse`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': userKey },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents,
-        generationConfig,
-        safetySettings: [
-          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
-          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
-        ],
-      }),
-      signal,
-    });
+    const attemptCtrl = new AbortController();
+    let timedOut = false;
+    const onUserAbort = () => attemptCtrl.abort();
+    if (signal) {
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      signal.addEventListener('abort', onUserAbort, { once: true });
+    }
+    const headerTimer = setTimeout(() => {
+      timedOut = true;
+      attemptCtrl.abort();
+    }, i < chain.length - 1 ? 8500 : 25000);
+
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/models/${encodeURIComponent(candidate)}:streamGenerateContent?alt=sse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': userKey },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents,
+          generationConfig,
+          safetySettings: [
+            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+          ],
+        }),
+        signal: attemptCtrl.signal,
+      });
+    } catch (err) {
+      clearTimeout(headerTimer);
+      if (signal) signal.removeEventListener('abort', onUserAbort);
+      if (signal?.aborted) throw err;
+      lastErr = timedOut
+        ? `[${candidate}] 응답 지연으로 자동 우회 중`
+        : `네트워크 연결 실패 (${candidate}): ${err.message}`;
+      if (i < chain.length - 1) continue;
+      throw new Error(lastErr);
+    }
+    clearTimeout(headerTimer);
 
     if (!res.ok) {
+      if (signal) signal.removeEventListener('abort', onUserAbort);
       const errText = await res.text().catch(() => '');
       try { lastErr = JSON.parse(errText)?.error?.message || `HTTP ${res.status}`; } catch { lastErr = `HTTP ${res.status}`; }
       if (isInvalidKeyError(res.status, lastErr)) {
@@ -537,7 +616,19 @@ async function streamGeminiLive({ model, thinkingLevel, maxOutputTokens, systemI
       throw new Error(lastErr);
     }
 
-    const { cleanText, stateUpdate } = await consumeGeminiSseResponse(res, onDelta);
+    let cleanText = '';
+    let stateUpdate = null;
+    try {
+      const parsed = await consumeGeminiSseResponse(res, onDelta);
+      cleanText = parsed.cleanText;
+      stateUpdate = parsed.stateUpdate;
+    } finally {
+      if (signal) signal.removeEventListener('abort', onUserAbort);
+    }
+    if (!cleanText && i < chain.length - 1) {
+      lastErr = `[${candidate}] 빈 응답 수신`;
+      continue;
+    }
     return {
       text: cleanText,
       stateUpdate,
@@ -672,6 +763,8 @@ export const cloudBackend = {
       defaultMode: cfg.defaultMode,
       viewMode: cfg.viewMode,
       fontFamily: cfg.fontFamily,
+      fontSize: cfg.fontSize || 'md',
+      backdropMode: cfg.backdropMode || 'dim',
       outputLength: cfg.outputLength,
       showAffinityHud: cfg.showAffinityHud,
       activePersonaId: cfg.activePersonaId,
@@ -694,35 +787,37 @@ export const cloudBackend = {
   },
 
   async verifyGemini({ apiKey, save = true, autoSelectRecommended = true }) {
-    const keyToTest = (apiKey || '').trim() || getEffectiveClientKey();
+    const cleanedInput = sanitizeApiKey(apiKey || '');
+    const keyToTest = cleanedInput || getEffectiveClientKey();
     let result;
 
-    if (cloudInfo.hasNetlifyFunction && (keyToTest || cloudInfo.hasServerKey)) {
+    if (!keyToTest && cloudInfo.hasNetlifyFunction && cloudInfo.hasServerKey) {
       const res = await fetch('/api/cloud/gemini/verify', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(keyToTest ? { 'x-user-gemini-key': keyToTest } : {}),
-        },
-        body: JSON.stringify({ apiKey: keyToTest }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: '' }),
       });
       result = await res.json().catch(() => ({ ok: false, error: '인증 응답 오류' }));
       if (!res.ok) throw new Error(result.error || 'API 키 인증 실패');
     } else {
-      if (!keyToTest) throw new Error('Google Gemini API 키를 입력해 주세요.');
+      if (!keyToTest) throw new Error('Google Gemini API 키를 입력해 주세요. (Google AI Studio의 AIza... 키)');
       const res = await fetch(`${API_BASE}/models?pageSize=100`, {
         headers: { 'x-goog-api-key': keyToTest },
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err?.error?.message || `API 키 인증 실패 (HTTP ${res.status})`);
+        const msg = err?.error?.message || `API 키 인증 실패 (HTTP ${res.status})`;
+        if (isInvalidKeyError(res.status, msg)) {
+          throw new Error('유효하지 않은 API 키입니다. aistudio.google.com/apikey 에서 발급한 AIza... 키를 정확히 복사해 주세요.');
+        }
+        throw new Error(msg);
       }
       const data = await res.json();
       const models = (data.models || [])
         .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
         .map((m) => String(m.name || '').replace(/^models\//, ''))
         .filter((id) => /gemini/i.test(id));
-      const recommendedModel = FALLBACK_MODELS.find((id) => models.includes(id)) || models[0] || 'gemini-3.8-flash';
+      const recommendedModel = FALLBACK_MODELS.find((id) => models.includes(id)) || models[0] || 'gemini-3.5-flash-lite';
       result = { ok: true, models, recommendedModel };
     }
 
@@ -730,7 +825,7 @@ export const cloudBackend = {
       lastVerifiedModel: result.recommendedModel,
       lastVerifiedAt: new Date().toISOString(),
     };
-    if (save && (apiKey || '').trim()) patch.geminiApiKey = apiKey.trim();
+    if (save && cleanedInput) patch.geminiApiKey = cleanedInput;
     if (autoSelectRecommended && result.recommendedModel) patch.defaultModel = result.recommendedModel;
     const config = await this.updateConfig(patch);
     return { ...result, config };
@@ -1022,9 +1117,15 @@ export const cloudBackend = {
     const cfg = readConfigRaw();
     const action = payload.action || 'send';
     const mode = payload.mode || cfg.defaultMode || 'story';
-    const model = payload.model || (mode === 'speed' ? 'gemini-3.5-flash-lite' : cfg.defaultModel);
-    const thinkingLevel = mode === 'pro' ? 'HIGH' : mode === 'speed' ? 'LOW' : 'MEDIUM';
-    const maxOutputTokens = mode === 'pro' ? 2600 : mode === 'speed' ? 1100 : 1600;
+    const modeDefaultModel =
+      mode === 'deep'
+        ? 'gemini-3-flash-preview'
+        : mode === 'pro'
+          ? 'gemini-3.8-flash'
+          : 'gemini-3.5-flash-lite';
+    const model = payload.model || modeDefaultModel || cfg.defaultModel;
+    const thinkingLevel = mode === 'deep' || mode === 'pro' ? 'LOW' : null;
+    const maxOutputTokens = mode === 'pro' ? 2600 : mode === 'deep' ? 2200 : mode === 'speed' ? 1100 : 1800;
 
     let session = loadedSession;
     let userText = '';

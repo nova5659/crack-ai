@@ -16,87 +16,98 @@ const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 
 export const GEMINI_FREE_MODELS = [
   {
-    id: 'gemini-3.8-flash',
-    name: 'Gemini 3.8 Flash',
-    badge: '무료 최강 · 추천',
-    tier: 'free',
-    family: 'gemini-3',
-    description: 'Google AI Studio 무료 티어 최고 성능 플래시 모델. 웹소설 문체, 감정선, 맥락 추론에 최적화.',
-    defaultThinkingLevel: 'MEDIUM',
-  },
-  {
-    id: 'gemini-3.5-flash',
-    name: 'Gemini 3.5 Flash',
-    badge: '안정 · 밸런스',
-    tier: 'free',
-    family: 'gemini-3',
-    description: '안정적인 무료 Flash 모델. 3.8 Flash 할당량 초과 시 자동 백업으로 동작.',
-    defaultThinkingLevel: 'MEDIUM',
-  },
-  {
     id: 'gemini-3.5-flash-lite',
     name: 'Gemini 3.5 Flash-Lite',
-    badge: '초고속 · 대용량 무료',
+    badge: '초고속 · 안정 추천',
     tier: 'free',
     family: 'gemini-3',
-    description: '가장 빠른 응답과 넉넉한 무료 일일 할당량. 추천 답변·요약 메모리·빠른 대화에 최적.',
-    defaultThinkingLevel: 'LOW',
+    description: '0.8초 첫 응답 · 가장 넉넉한 무료 할당량 · 503 혼잡 없이 웹소설 문체와 롤플레잉에 가장 안정적.',
+    defaultThinkingLevel: null,
   },
   {
     id: 'gemini-3-flash-preview',
     name: 'Gemini 3 Flash Preview',
-    badge: '프리뷰 호환',
+    badge: '심화 서사 · 무료',
     tier: 'free',
     family: 'gemini-3',
-    description: 'Gemini 3 세대 프리뷰 호환 모델.',
+    description: '깊은 감정선과 추론을 지원하는 Gemini 3 Flash 모델 (혼잡 시 3.5 Flash-Lite로 자동 전환).',
     defaultThinkingLevel: 'LOW',
   },
   {
-    id: 'gemini-2.5-flash',
-    name: 'Gemini 2.5 Flash',
-    badge: '레거시 호환',
+    id: 'gemini-3.1-flash-lite',
+    name: 'Gemini 3.1 Flash-Lite',
+    badge: '쾌속 백업 · 무료',
     tier: 'free',
-    family: 'gemini-2.5',
-    description: '구버전 API 프로젝트 호환용 자동 폴백 모델.',
+    family: 'gemini-3',
+    description: '1.5초 응답의 쾌속 무료 모델. 자동 백업 체인에 포함.',
     defaultThinkingLevel: null,
+  },
+  {
+    id: 'gemini-3.5-flash',
+    name: 'Gemini 3.5 Flash',
+    badge: '밸런스 · 무료',
+    tier: 'free',
+    family: 'gemini-3',
+    description: '풍부한 장문 서사용 Flash 모델 (응답 대기 5~8초).',
+    defaultThinkingLevel: 'LOW',
+  },
+  {
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    badge: '최신 플래시 · 자동우회',
+    tier: 'free',
+    family: 'gemini-3',
+    description: '최신 세대 Flash. 서버 혼잡(503)이나 지연 발생 시 8초 내에 안정 모델로 자동 우회합니다.',
+    defaultThinkingLevel: 'LOW',
   },
 ];
 
 export const GENERATION_MODES = {
   story: {
     id: 'story',
-    label: '스토리',
-    subtitle: 'Gemini 3.8 Flash · 균형 잡힌 웹소설 서사',
-    model: 'gemini-3.8-flash',
-    thinkingLevel: 'MEDIUM',
-    maxOutputTokens: 1600,
+    label: '쾌속 스토리',
+    subtitle: 'Gemini 3.5 Flash-Lite · 1초대 초고속 · 끊김 없는 웹소설 서사',
+    model: 'gemini-3.5-flash-lite',
+    thinkingLevel: null,
+    maxOutputTokens: 1800,
+  },
+  deep: {
+    id: 'deep',
+    label: '심화 서사',
+    subtitle: 'Gemini 3 Flash · 깊은 심리 묘사와 치밀한 복선 전개',
+    model: 'gemini-3-flash-preview',
+    thinkingLevel: 'LOW',
+    maxOutputTokens: 2200,
   },
   pro: {
     id: 'pro',
-    label: '프로 서사',
-    subtitle: 'Gemini 3.8 Flash · 깊은 심리 묘사와 장문 전개',
+    label: '프로 추론',
+    subtitle: 'Gemini 3.8 / 3.5 Flash · 최고 퀄리티 장문 (혼잡 시 자동 우회)',
     model: 'gemini-3.8-flash',
-    thinkingLevel: 'HIGH',
+    thinkingLevel: 'LOW',
     maxOutputTokens: 2600,
   },
   speed: {
     id: 'speed',
-    label: '스피드',
-    subtitle: 'Gemini 3.5 Flash-Lite · 초고속 응답 · 무료 한도 절약',
+    label: '초고속',
+    subtitle: 'Gemini 3.5 Flash-Lite · 짧은 템포 빠른 티키타카',
     model: 'gemini-3.5-flash-lite',
-    thinkingLevel: 'LOW',
+    thinkingLevel: null,
     maxOutputTokens: 1100,
   },
 };
 
 const DEFAULT_CONFIG = {
+  configVersion: 2,
   geminiApiKey: '',
-  defaultModel: process.env.GEMINI_DEFAULT_MODEL || 'gemini-3.8-flash',
+  defaultModel: process.env.GEMINI_DEFAULT_MODEL || 'gemini-3.5-flash-lite',
   defaultMode: 'story',
   viewMode: 'novel', // 'novel' | 'chat'
   fontFamily: 'sans', // 'sans' | 'serif'
+  fontSize: 'md', // 'sm' | 'md' | 'lg'
+  backdropMode: 'dim', // 'dim' | 'vivid'
   outputLength: 'medium', // 'short' | 'medium' | 'long'
-  autoSummaryInterval: 12,
+  autoSummaryInterval: 10,
   showAffinityHud: true,
   activePersonaId: 'persona_default',
   lastVerifiedModel: '',
@@ -152,10 +163,27 @@ export function readConfig() {
       stored = {};
     }
   }
-  return {
+  const merged = {
     ...DEFAULT_CONFIG,
     ...stored,
   };
+  // One-time migration from v1 (gemini-3.8-flash default that often hits 503 high demand) to fast stable gemini-3.5-flash-lite
+  if ((stored.configVersion || 1) < 2) {
+    if (merged.defaultModel === 'gemini-3.8-flash' && (merged.defaultMode || 'story') === 'story') {
+      merged.defaultModel = 'gemini-3.5-flash-lite';
+    }
+    merged.configVersion = 2;
+    if (fs.existsSync(CONFIG_PATH)) {
+      try {
+        const tmpPath = `${CONFIG_PATH}.tmp`;
+        fs.writeFileSync(tmpPath, JSON.stringify(merged, null, 2), 'utf8');
+        fs.renameSync(tmpPath, CONFIG_PATH);
+      } catch {
+        // Ignore non-fatal migration write error
+      }
+    }
+  }
+  return merged;
 }
 
 export function writeConfig(partial) {
@@ -203,6 +231,8 @@ export function getPublicConfig() {
     defaultMode: cfg.defaultMode,
     viewMode: cfg.viewMode,
     fontFamily: cfg.fontFamily,
+    fontSize: cfg.fontSize || 'md',
+    backdropMode: cfg.backdropMode || 'dim',
     outputLength: cfg.outputLength,
     autoSummaryInterval: cfg.autoSummaryInterval,
     showAffinityHud: cfg.showAffinityHud,

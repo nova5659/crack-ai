@@ -166,7 +166,13 @@ async function handleChatStream(req, res, sessionId) {
   const persona = getPersona(session.personaId || cfg.activePersonaId);
   const action = body.action || 'send'; // 'send' | 'regenerate' | 'continue'
   const mode = body.mode || cfg.defaultMode || 'story';
-  const requestedModel = body.model || (mode === 'speed' ? 'gemini-3.5-flash-lite' : cfg.defaultModel);
+  const modeDefaultModel =
+    mode === 'deep'
+      ? 'gemini-3-flash-preview'
+      : mode === 'pro'
+        ? 'gemini-3.8-flash'
+        : 'gemini-3.5-flash-lite';
+  const requestedModel = body.model || modeDefaultModel || cfg.defaultModel;
   const outputLength = body.outputLength || cfg.outputLength || 'medium';
   const viewMode = body.viewMode || cfg.viewMode || 'novel';
 
@@ -238,7 +244,8 @@ async function handleChatStream(req, res, sessionId) {
   });
 
   const abortController = new AbortController();
-  req.on('close', () => {
+  // IMPORTANT: In Node 18+/22+/26, listen to `res.on('close')`, NOT `req.on('close')` (which fires as soon as POST body ends!).
+  res.on('close', () => {
     if (!res.writableEnded) {
       abortController.abort();
     }
@@ -349,7 +356,10 @@ async function handleChatStream(req, res, sessionId) {
     res.end();
   } catch (err) {
     if (err?.name !== 'AbortError') {
-      writeSse(res, 'error', { message: err?.message || 'AI 응답 생성 중 오류가 발생했습니다.' });
+      writeSse(res, 'error', {
+        message: err?.message || 'AI 응답 생성 중 오류가 발생했습니다.',
+        code: err?.code || '',
+      });
     }
     res.end();
   }
@@ -713,6 +723,8 @@ export function createAppServer({ port = getPort() } = {}) {
         if (typeof body.defaultMode === 'string') allowed.defaultMode = body.defaultMode.trim();
         if (typeof body.viewMode === 'string') allowed.viewMode = body.viewMode;
         if (typeof body.fontFamily === 'string') allowed.fontFamily = body.fontFamily;
+        if (typeof body.fontSize === 'string') allowed.fontSize = body.fontSize;
+        if (typeof body.backdropMode === 'string') allowed.backdropMode = body.backdropMode;
         if (typeof body.outputLength === 'string') allowed.outputLength = body.outputLength;
         if (typeof body.showAffinityHud === 'boolean') allowed.showAffinityHud = body.showAffinityHud;
         if (typeof body.activePersonaId === 'string') allowed.activePersonaId = body.activePersonaId;

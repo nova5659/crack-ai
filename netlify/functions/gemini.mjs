@@ -1,11 +1,12 @@
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 const FALLBACK_BASE = [
-  'gemini-3.8-flash',
-  'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
   'gemini-3-flash-preview',
-  'gemini-2.5-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-3.5-flash',
+  'gemini-3.8-flash',
 ];
 
 function sanitizeApiKey(raw = '') {
@@ -59,15 +60,15 @@ function resolveApiKey(req, bodyKey = '') {
   return { key: '', source: 'none' };
 }
 
-function buildPayload({ modelId, systemInstruction, contents, thinkingLevel = 'MEDIUM', maxOutputTokens = 1600, responseMimeType = null }) {
+function buildPayload({ modelId, systemInstruction, contents, thinkingLevel = null, maxOutputTokens = 1800, responseMimeType = null }) {
   const generationConfig = { maxOutputTokens };
   if (responseMimeType) generationConfig.responseMimeType = responseMimeType;
 
   if (isGemini3Model(modelId)) {
-    const safeLevel = ['LOW', 'MEDIUM', 'HIGH'].includes(String(thinkingLevel).toUpperCase())
-      ? String(thinkingLevel).toUpperCase()
-      : 'MEDIUM';
-    generationConfig.thinkingConfig = { thinkingLevel: safeLevel };
+    const isLite = /lite/i.test(modelId);
+    if (!isLite && thinkingLevel && ['LOW', 'MEDIUM', 'HIGH'].includes(String(thinkingLevel).toUpperCase())) {
+      generationConfig.thinkingConfig = { thinkingLevel: String(thinkingLevel).toUpperCase() };
+    }
   } else {
     generationConfig.temperature = 0.85;
   }
@@ -123,7 +124,7 @@ async function discoverModels(key) {
     FALLBACK_BASE.find((id) => generateModels.includes(id)) ||
     generateModels.find((id) => /flash/i.test(id) && !/image|tts|audio/i.test(id)) ||
     generateModels[0] ||
-    'gemini-3.8-flash';
+    'gemini-3.5-flash-lite';
   return { ok: true, models: generateModels, recommendedModel };
 }
 
@@ -138,7 +139,7 @@ export default async (req) => {
         ok: true,
         runtime: 'netlify-cloud',
         hasServerKey: Boolean(serverKey),
-        defaultModel: 'gemini-3.8-flash',
+        defaultModel: 'gemini-3.5-flash-lite',
       },
       { headers: { 'Cache-Control': 'no-store' } }
     );
@@ -179,32 +180,44 @@ export default async (req) => {
       );
     }
 
-    const preferredModel = body.model || 'gemini-3.8-flash';
+    const preferredModel = body.model || 'gemini-3.5-flash-lite';
     let chain = buildFallbackChain(preferredModel);
     let discovered = false;
     let lastErr = 'Gemini API 스트리밍 요청에 실패했습니다.';
 
     for (let i = 0; i < chain.length; i++) {
       const candidate = chain[i];
-      const upstream = await fetch(
-        `${API_BASE}/models/${encodeURIComponent(candidate)}:streamGenerateContent?alt=sse`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': key,
-          },
-          body: JSON.stringify(
-            buildPayload({
-              modelId: candidate,
-              systemInstruction: body.systemInstruction,
-              contents: body.contents,
-              thinkingLevel: body.thinkingLevel || 'MEDIUM',
-              maxOutputTokens: body.maxOutputTokens || 1600,
-            })
-          ),
-        }
-      );
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), i < chain.length - 1 ? 8500 : 25000);
+      let upstream;
+      try {
+        upstream = await fetch(
+          `${API_BASE}/models/${encodeURIComponent(candidate)}:streamGenerateContent?alt=sse`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': key,
+            },
+            body: JSON.stringify(
+              buildPayload({
+                modelId: candidate,
+                systemInstruction: body.systemInstruction,
+                contents: body.contents,
+                thinkingLevel: body.thinkingLevel || (/lite/i.test(candidate) ? null : 'LOW'),
+                maxOutputTokens: body.maxOutputTokens || 1800,
+              })
+            ),
+            signal: ctrl.signal,
+          }
+        );
+      } catch (err) {
+        clearTimeout(timer);
+        lastErr = `[${candidate}] 응답 시간 초과 (${err.message})`;
+        if (i < chain.length - 1) continue;
+        return Response.json({ error: lastErr }, { status: 504 });
+      }
+      clearTimeout(timer);
 
       if (!upstream.ok) {
         const errText = await upstream.text().catch(() => '');

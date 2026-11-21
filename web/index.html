@@ -44,7 +44,7 @@
         <button class="nav-item" data-view="anime">
           <span class="nav-icon">🎬</span>
           <span class="nav-label">애니 월드</span>
-          <span class="nav-badge anime-badge" id="navAnimeCount">36</span>
+          <span class="nav-badge anime-badge" id="navAnimeCount">41</span>
         </button>
         <button class="nav-item" data-view="chats">
           <span class="nav-icon">💬</span>
@@ -115,6 +115,15 @@
           <!-- Hero Spotlight -->
           <div class="hero-spotlight" id="heroSpotlight"></div>
 
+          <!-- Continue Playing Strip (shown when user has active stories) -->
+          <div class="section-block" id="continuePlayingSection" hidden>
+            <div class="section-header">
+              <h2>⏱️ 이어서 볼 이야기</h2>
+              <button class="ghost-btn small" id="goToChatsFromHomeBtn">내 채팅 전체 →</button>
+            </div>
+            <div class="continue-strip" id="continuePlayingStrip"></div>
+          </div>
+
           <!-- Genre Filter Pills -->
           <div class="filter-bar">
             <div class="genre-tabs" id="genreTabs"></div>
@@ -123,6 +132,21 @@
               <button class="sort-pill" data-sort="likes">추천순</button>
               <button class="sort-pill" data-sort="newest">최신/내 캐릭터</button>
             </div>
+          </div>
+
+          <!-- Trending Hashtags Quick Explorer -->
+          <div class="quick-tags-strip" id="homeQuickTags">
+            <span class="quick-tags-label">🔥 인기 키워드</span>
+            <button type="button" class="quick-tag-btn" data-qtag="국가의시대">#국가의시대</button>
+            <button type="button" class="quick-tag-btn" data-qtag="주술회전">#주술회전</button>
+            <button type="button" class="quick-tag-btn" data-qtag="귀멸의칼날">#귀멸의칼날</button>
+            <button type="button" class="quick-tag-btn" data-qtag="원피스">#원피스</button>
+            <button type="button" class="quick-tag-btn" data-qtag="진격의거인">#진격의거인</button>
+            <button type="button" class="quick-tag-btn" data-qtag="프리렌">#프리렌</button>
+            <button type="button" class="quick-tag-btn" data-qtag="세계관시뮬">#세계관시뮬</button>
+            <button type="button" class="quick-tag-btn" data-qtag="집착">#집착</button>
+            <button type="button" class="quick-tag-btn" data-qtag="회귀">#회귀</button>
+            <button type="button" class="quick-tag-btn" data-qtag="무협">#무협</button>
           </div>
 
           <!-- Real-time Top Ranking Strip -->
@@ -138,7 +162,7 @@
           <div class="section-block" id="homeAnimeBannerSection">
             <div class="section-header">
               <h2>🎬 메이저 애니메이션 인기 월드</h2>
-              <button class="ghost-btn small" id="goToAnimeHubBtn">애니 월드 전체 보기 (36+) →</button>
+              <button class="ghost-btn small" id="goToAnimeHubBtn">애니 월드 전체 보기 (41+) →</button>
             </div>
             <div class="anime-quick-row" id="homeAnimeQuickRow"></div>
           </div>
@@ -158,9 +182,9 @@
           <div class="view-page-header">
             <div>
               <h1>🎬 애니 월드 · 메이저 애니메이션 아카이브</h1>
-              <p>주술회전·귀멸의 칼날·원피스·진격의 거인·프리렌·나혼렙·포켓몬 등 36+ 인기 애니 캐릭터 챗 & 멀티캐릭터 세계관 시뮬!</p>
+              <p>주술회전·귀멸의 칼날·원피스·진격의 거인·프리렌·나혼렙·포켓몬 등 41+ 인기 애니 캐릭터 챗 & 멀티캐릭터 세계관 시뮬!</p>
             </div>
-            <span class="badge-original" id="animeTotalBadge">총 36개 애니 월드 탑재</span>
+            <span class="badge-original" id="animeTotalBadge">총 41개 애니 월드 탑재</span>
           </div>
 
           <!-- Instant Any-Anime Summoner -->
@@ -247,7 +271,7 @@
           <!-- AI Auto-Fill Banner -->
           <div class="ai-wizard-card">
             <div class="ai-wizard-head">
-              <span class="badge-glow">✨ Gemini 3.8 Flash AI 도우미</span>
+              <span class="badge-glow">✨ Gemini 무료 AI 도우미</span>
               <strong>아이디어 한 줄로 캐릭터·첫 인사말·로어북 자동 완성</strong>
             </div>
             <div class="ai-wizard-row">
@@ -452,9 +476,10 @@
               </div>
 
               <select class="compact-select" id="chatAiModeSelect" title="AI 생성 모드">
-                <option value="story">✦ 스토리 (3.8 Flash)</option>
-                <option value="pro">🔥 프로 서사 (High)</option>
-                <option value="speed">⚡ 스피드 (Flash-Lite)</option>
+                <option value="story">⚡ 쾌속 스토리 (3.5 Lite · 추천)</option>
+                <option value="deep">✦ 심화 서사 (3 Flash)</option>
+                <option value="pro">🔥 프로 추론 (3.8 · 자동우회)</option>
+                <option value="speed">💨 초고속 티키타카</option>
               </select>
 
               <button class="pill-btn inspector-toggle-btn" id="toggleInspectorBtn" title="유저노트 · 메모리 · 로어북">
@@ -468,7 +493,7 @@
 
           <!-- Demo Mode Subtle Notice Banner -->
           <div class="demo-notice-bar" id="chatDemoBanner" hidden>
-            <span>✨ 현재 <strong>미리보기 모드</strong>로 대화 중입니다. 무료 Google Gemini API 키를 연결하면 진짜 <strong>Gemini 3.8 Flash</strong> AI가 응답해요!</span>
+            <span>✨ 현재 <strong>미리보기 모드</strong>로 대화 중입니다. 무료 Google Gemini API 키를 연결하면 <strong>0.8초대 실시간 Gemini AI</strong>가 응답해요!</span>
             <button class="tiny-accent-btn" id="bannerConnectApiBtn">무료 API 키 연결 (30초)</button>
           </div>
 
@@ -491,23 +516,38 @@
                 <div class="suggestions-list" id="suggestionsList"></div>
               </div>
 
+              <!-- Nation Simulation Executive Command Bar (《국가의 시대》 전용 원클릭 정책 지시) -->
+              <div class="nation-cmd-bar" id="nationQuickCmdBar" hidden>
+                <span class="nation-cmd-label">🏛️ 국정 지시</span>
+                <button type="button" class="nation-cmd-chip" data-ncmd="현재 국가의 경제·외교·군사·여론 현황과 시급한 현안 3가지를 비서실장에게 종합 브리핑받는다.">📊 국정 브리핑</button>
+                <button type="button" class="nation-cmd-chip" data-ncmd="기획재정부 장관을 소집해 내수 부양과 첨단 산업 투자, 세제 개혁안을 전격 발표한다.">💰 경제 개혁</button>
+                <button type="button" class="nation-cmd-chip" data-ncmd="외교부 장관과 함께 주변 강대국 정상들과의 긴급 외교 협상 테이블을 열고 실리 외교를 추진한다.">🤝 정상 외교</button>
+                <button type="button" class="nation-cmd-chip" data-ncmd="국방부 장관 및 합참의장과 국가안전보장회의(NSC)를 소집해 국방력 강화와 안보 태세를 점검한다.">⚔️ 국방 회의</button>
+                <button type="button" class="nation-cmd-chip" data-ncmd="생중계 대국민 담화문에 나서 국민들의 불안을 잠재우고 강력한 국가 비전을 선포한다.">📢 대국민 담화</button>
+                <button type="button" class="nation-cmd-chip hot" data-ncmd="((연출 지시: 지금 즉시 국가와 국제 정세를 뒤흔들 긴급 돌발 속보와 대형 위기 이벤트를 발생시켜줘!))">🌀 돌발 사건!</button>
+              </div>
+
               <!-- Composer Footer -->
               <div class="composer-wrap">
                 <div class="composer-toolbar">
-                  <button class="tool-chip" id="toggleSuggestionsBtn" title="추천 답변 보기">
+                  <button type="button" class="tool-chip" id="toggleSuggestionsBtn" title="추천 답변 보기">
                     💡 추천 답변
                   </button>
-                  <button class="tool-chip" id="continueBtn" title="유저 입력 없이 캐릭터 이야기 이어쓰기">
+                  <button type="button" class="tool-chip" id="continueBtn" title="유저 입력 없이 캐릭터 이야기 이어쓰기">
                     ⏩ 이어쓰기
                   </button>
-                  <button class="tool-chip" id="regenerateLastBtn" title="마지막 답변 다시 생성">
+                  <button type="button" class="tool-chip" id="regenerateLastBtn" title="마지막 답변 다시 생성">
                     ↺ 재생성
                   </button>
+                  <span class="toolbar-divider" aria-hidden="true"></span>
+                  <button type="button" class="tool-chip fmt-chip" id="fmtActionBtn" title="행동 지문 (*...*) 삽입">*행동*</button>
+                  <button type="button" class="tool-chip fmt-chip" id="fmtDialogueBtn" title="대사 (&quot;...&quot;) 삽입">"대사"</button>
+                  <button type="button" class="tool-chip fmt-chip" id="fmtOocBtn" title="AI 연출 지시 ((...)) 삽입">(지시)</button>
                   <div class="toolbar-spacer"></div>
                   <div class="length-pills" id="lengthPills" title="출력 분량">
-                    <button class="len-pill" data-len="short">짧게</button>
-                    <button class="len-pill active" data-len="medium">보통</button>
-                    <button class="len-pill" data-len="long">길게</button>
+                    <button type="button" class="len-pill" data-len="short">짧게</button>
+                    <button type="button" class="len-pill active" data-len="medium">보통</button>
+                    <button type="button" class="len-pill" data-len="long">길게</button>
                   </div>
                 </div>
 
@@ -621,10 +661,31 @@
                 <!-- Tab 4: Session & Display -->
                 <div class="insp-pane" id="insp-session">
                   <div class="insp-block">
-                    <label class="insp-label">소설 글꼴</label>
+                    <label class="insp-label">AI 생성 모드 (속도 / 서사 깊이)</label>
+                    <select id="inspAiModeSelect" class="full-select">
+                      <option value="story">⚡ 쾌속 스토리 (3.5 Flash-Lite · 0.8초 추천)</option>
+                      <option value="deep">✦ 심화 서사 (3 Flash Preview · 깊은 심리)</option>
+                      <option value="pro">🔥 프로 추론 (3.8 Flash · 혼잡 시 자동우회)</option>
+                      <option value="speed">💨 초고속 티키타카 (짧은 호흡)</option>
+                    </select>
+                  </div>
+                  <div class="insp-block">
+                    <label class="insp-label">소설 글꼴 & 글자 크기</label>
                     <div class="segmented full" id="fontFamilyToggle">
                       <button class="seg-btn active" data-font="sans">고딕 (모던)</button>
                       <button class="seg-btn" data-font="serif">명조 (웹소설)</button>
+                    </div>
+                    <div class="segmented full" id="fontSizeToggle">
+                      <button class="seg-btn" data-fsize="sm">작게</button>
+                      <button class="seg-btn active" data-fsize="md">보통</button>
+                      <button class="seg-btn" data-fsize="lg">크게</button>
+                    </div>
+                  </div>
+                  <div class="insp-block">
+                    <label class="insp-label">배경 일러스트 밝기</label>
+                    <div class="segmented full" id="backdropToggle">
+                      <button class="seg-btn active" data-bmode="dim">🌙 은은하게 (독서 집중)</button>
+                      <button class="seg-btn" data-bmode="vivid">✨ 선명하게 (몰입 배경)</button>
                     </div>
                   </div>
                   <div class="insp-block">
@@ -675,8 +736,11 @@
         <div class="api-guide-box">
           <div class="api-guide-top">
             <div>
-              <span class="badge-free">100% FREE TIER</span>
-              <h3>가장 좋은 무료 구글 AI: Gemini 3.8 Flash</h3>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <span class="badge-free">100% FREE TIER</span>
+                <span class="runtime-pill" id="settingsRuntimeBadge">☁️ 직통 연결</span>
+              </div>
+              <h3>최고속 무료 구글 AI: Gemini 3.5 Flash-Lite · 3 Flash</h3>
             </div>
             <a
               href="https://aistudio.google.com/apikey"
@@ -690,7 +754,7 @@
           <ol class="guide-steps">
             <li>오른쪽 <strong>[무료 API 키 발급받기]</strong>를 눌러 Google AI Studio에 구글 계정으로 로그인 (카드 등록 불필요)</li>
             <li><strong>Create API key</strong> 클릭 후 생성된 <code>AIza...</code> 키를 복사</li>
-            <li>아래 입력창에 붙여넣고 <strong>[연결 테스트 & 저장]</strong> 클릭하면 즉시 최고 성능 무료 모델로 자동 연결!</li>
+            <li>아래 입력창에 붙여넣고 <strong>[연결 테스트 & 저장]</strong> 클릭하면 <strong>0.8초 초고속 무료 모델 + 자동 우회</strong>가 바로 켜집니다!</li>
           </ol>
         </div>
 
@@ -716,9 +780,10 @@
           <label class="field">
             <span>기본 AI 서사 모드</span>
             <select id="settingsModeSelect">
-              <option value="story">스토리 (Gemini 3.8 Flash · 균형)</option>
-              <option value="pro">프로 서사 (Gemini 3.8 Flash · 고품질)</option>
-              <option value="speed">스피드 (Gemini 3.5 Flash-Lite · 초고속)</option>
+              <option value="story">⚡ 쾌속 스토리 (Gemini 3.5 Flash-Lite · 0.8초 추천)</option>
+              <option value="deep">✦ 심화 서사 (Gemini 3 Flash · 깊은 심리·복선)</option>
+              <option value="pro">🔥 프로 추론 (Gemini 3.8 Flash · 자동 우회)</option>
+              <option value="speed">💨 초고속 티키타카 (짧고 빠른 템포)</option>
             </select>
           </label>
         </div>

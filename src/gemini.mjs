@@ -25,11 +25,12 @@ export function isGemini3Model(modelId = '') {
 export function buildFallbackChain(preferredModel) {
   const baseOrder = [
     preferredModel,
-    'gemini-3.8-flash',
-    'gemini-3.5-flash',
     'gemini-3.5-flash-lite',
     'gemini-3-flash-preview',
-    'gemini-2.5-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.5-flash',
+    'gemini-3.8-flash',
   ];
   const seen = new Set();
   const out = [];
@@ -68,16 +69,16 @@ export function buildGenerationPayload({
   }
 
   // Gemini 3.x models deprecate temperature/topP/topK (can return 400).
-  // Use thinkingConfig.thinkingLevel instead (LOW | MEDIUM | HIGH; never MINIMAL on 3.8 Flash).
+  // Use thinkingConfig.thinkingLevel only on non-Lite models when explicitly requested (LOW/MEDIUM/HIGH);
+  // omitting thinkingConfig on Flash-Lite gives blazing <1s responses!
+  const isLite = /lite/i.test(modelId || '');
   if (isGemini3Model(modelId)) {
-    const safeLevel = ['LOW', 'MEDIUM', 'HIGH'].includes(String(thinkingLevel).toUpperCase())
-      ? String(thinkingLevel).toUpperCase()
-      : 'MEDIUM';
-    generationConfig.thinkingConfig = {
-      thinkingLevel: safeLevel,
-    };
+    if (!isLite && thinkingLevel && ['LOW', 'MEDIUM', 'HIGH'].includes(String(thinkingLevel).toUpperCase())) {
+      generationConfig.thinkingConfig = {
+        thinkingLevel: String(thinkingLevel).toUpperCase(),
+      };
+    }
   } else {
-    // Legacy Gemini 2.5 fallback supports temperature cleanly
     generationConfig.temperature = 0.85;
   }
 
@@ -222,13 +223,13 @@ export async function listAvailableModels(apiKey) {
     .map((m) => String(m.name || '').replace(/^models\//, ''))
     .filter((id) => /gemini/i.test(id));
 
-  // Recommend best available free Flash model detected on this key
+  // Recommend fastest rock-solid free Flash model detected on this key
   const preferredOrder = [
-    'gemini-3.8-flash',
-    'gemini-3.5-flash',
     'gemini-3.5-flash-lite',
     'gemini-3-flash-preview',
-    'gemini-2.5-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.8-flash',
   ];
   const recommended =
     preferredOrder.find((id) => generateModels.includes(id)) ||
@@ -281,13 +282,27 @@ export async function streamChatCompletion({
   for (let i = 0; i < chain.length; i++) {
     const candidateModel = chain[i];
     const url = `${API_BASE}/models/${encodeURIComponent(candidateModel)}:streamGenerateContent?alt=sse`;
+    const isLite = /lite/i.test(candidateModel);
     const body = buildGenerationPayload({
       modelId: candidateModel,
       systemInstruction,
       contents,
-      thinkingLevel: modeCfg.thinkingLevel,
+      thinkingLevel: isLite ? null : (modeCfg.thinkingLevel || 'LOW'),
       maxOutputTokens: targetMaxTokens,
     });
+
+    // Per-model fast-failover header timeout (8.5s) so a congested model NEVER hangs the user!
+    const attemptCtrl = new AbortController();
+    let timedOut = false;
+    const onUserAbort = () => attemptCtrl.abort();
+    if (signal) {
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      signal.addEventListener('abort', onUserAbort, { once: true });
+    }
+    const headerTimer = setTimeout(() => {
+      timedOut = true;
+      attemptCtrl.abort();
+    }, i < chain.length - 1 ? 8500 : 25000);
 
     let res;
     try {
@@ -298,15 +313,24 @@ export async function streamChatCompletion({
           'x-goog-api-key': cleanKey,
         },
         body: JSON.stringify(body),
-        signal,
+        signal: attemptCtrl.signal,
       });
     } catch (err) {
-      if (err?.name === 'AbortError') throw err;
-      lastError = new Error(`네트워크 오류 (${candidateModel}): ${err.message}`);
-      continue;
+      clearTimeout(headerTimer);
+      if (signal) signal.removeEventListener('abort', onUserAbort);
+      if (signal?.aborted) throw err;
+      lastError = new Error(
+        timedOut
+          ? `[${candidateModel}] 응답 지연으로 자동 우회 중`
+          : `네트워크 오류 (${candidateModel}): ${err.message}`
+      );
+      if (i < chain.length - 1) continue;
+      throw lastError;
     }
+    clearTimeout(headerTimer);
 
     if (!res.ok) {
+      if (signal) signal.removeEventListener('abort', onUserAbort);
       const errBody = await res.text().catch(() => '');
       let errMsg = `HTTP ${res.status}`;
       try {
@@ -316,11 +340,9 @@ export async function streamChatCompletion({
         // ignore
       }
       lastError = new Error(`[${candidateModel}] ${errMsg}`);
-      // Invalid API key (Google returns HTTP 400 API_KEY_INVALID as well as 401/403!) -> stop immediately
       if (isInvalidKeyError(res.status, errMsg)) {
         throw new Error('Google Gemini API 키가 유효하지 않습니다. 상단 [🔑 무료 Gemini API]에서 Google AI Studio(aistudio.google.com/apikey) 키를 다시 확인 후 [연결 테스트 & 저장]을 눌러주세요.');
       }
-      // If all preset models fail with 404, auto-discover live available models on this key
       if (res.status === 404 && i === chain.length - 1 && !discoveredFallback) {
         discoveredFallback = true;
         const avail = await listAvailableModels(cleanKey).catch(() => ({ ok: false }));
@@ -329,7 +351,6 @@ export async function streamChatCompletion({
           continue;
         }
       }
-      // Retry next model in fallback chain on 400 (param mismatch), 404, 429, 500, 503
       if ([400, 404, 429, 500, 503].includes(res.status) && i < chain.length - 1) {
         continue;
       }
@@ -346,31 +367,39 @@ export async function streamChatCompletion({
     let buffer = '';
     let usage = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || '';
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
 
-      for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line.startsWith('data:')) continue;
-        const jsonStr = line.slice(5).trim();
-        if (!jsonStr || jsonStr === '[DONE]') continue;
-        try {
-          const parsed = JSON.parse(jsonStr);
-          const chunkText = extractTextFromCandidate(parsed);
-          if (chunkText) filter.push(chunkText);
-          if (parsed.usageMetadata) usage = parsed.usageMetadata;
-        } catch {
-          // Ignore malformed keepalive chunk
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (!line.startsWith('data:')) continue;
+          const jsonStr = line.slice(5).trim();
+          if (!jsonStr || jsonStr === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const chunkText = extractTextFromCandidate(parsed);
+            if (chunkText) filter.push(chunkText);
+            if (parsed.usageMetadata) usage = parsed.usageMetadata;
+          } catch {
+            // Ignore malformed keepalive chunk
+          }
         }
       }
+    } finally {
+      if (signal) signal.removeEventListener('abort', onUserAbort);
     }
 
     const { cleanText, stateUpdate } = filter.finish();
+    if (!cleanText && i < chain.length - 1) {
+      lastError = new Error(`[${candidateModel}] 빈 응답 수신`);
+      continue;
+    }
     return {
       text: cleanText,
       stateUpdate,
