@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#08080E" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="CRACK" />
+  <title>CRACK · AI 캐릭터 챗 & 인터랙티브 스토리</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="./assets/icons/icon.svg" />
+  <link rel="apple-touch-icon" href="./assets/icons/icon.svg" />
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <!-- Left Navigation Sidebar (Desktop) -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand" id="brandHomeBtn" role="button" tabindex="0">
+        <div class="brand-mark">
+          <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <path d="M18.5 3.5L9.5 17H16.2L12.8 28.5L23.5 14.2H16.5L18.5 3.5Z" fill="url(#brandGrad)"/>
+            <defs>
+              <linearGradient id="brandGrad" x1="8" y1="3" x2="24" y2="29" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#C084FC"/>
+                <stop offset="0.55" stop-color="#7C5CFF"/>
+                <stop offset="1" stop-color="#F43F5E"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">CRACK</span>
+          <span class="brand-sub">AI STORY CHAT</span>
+        </div>
+      </div>
+
+      <nav class="nav-list" aria-label="주 메뉴">
+        <button class="nav-item active" data-view="home">
+          <span class="nav-icon">✦</span>
+          <span class="nav-label">홈 · 탐색</span>
+        </button>
+        <button class="nav-item" data-view="anime">
+          <span class="nav-icon">🎬</span>
+          <span class="nav-label">애니 월드</span>
+          <span class="nav-badge anime-badge" id="navAnimeCount">36</span>
+        </button>
+        <button class="nav-item" data-view="chats">
+          <span class="nav-icon">💬</span>
+          <span class="nav-label">내 채팅</span>
+          <span class="nav-badge" id="navSessionCount" hidden>0</span>
+        </button>
+        <button class="nav-item" data-view="creator">
+          <span class="nav-icon">🪄</span>
+          <span class="nav-label">캐릭터 제작</span>
+        </button>
+        <button class="nav-item" data-view="library">
+          <span class="nav-icon">🔖</span>
+          <span class="nav-label">보관함 · 페르소나</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-recent">
+        <div class="sidebar-section-title">최근 이야기</div>
+        <div class="sidebar-sessions" id="sidebarSessions">
+          <div class="sidebar-empty">아직 시작한 이야기가 없어요</div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="api-status-card" id="sidebarApiBtn">
+          <div class="api-status-dot" id="apiStatusDot"></div>
+          <div class="api-status-info">
+            <div class="api-status-title" id="apiStatusTitle">Gemini 무료 API 연결</div>
+            <div class="api-status-sub" id="apiStatusSub">미리보기 모드 · 클릭해 설정</div>
+          </div>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Workspace -->
+    <div class="main-container">
+      <!-- Global Top Header (hidden during fullscreen chat) -->
+      <header class="topbar" id="globalTopbar">
+        <div class="topbar-left">
+          <div class="mobile-brand" id="mobileBrandBtn">
+            <span class="mobile-brand-bolt">✦</span>
+            <span>CRACK</span>
+          </div>
+          <div class="search-box" id="globalSearchWrap">
+            <span class="search-icon">🔍</span>
+            <input
+              type="search"
+              id="globalSearchInput"
+              placeholder="애니(주술회전·귀멸·원피스·진격·프리렌), 캐릭터, #태그 검색..."
+              autocomplete="off"
+            />
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button class="pill-btn api-pill" id="topApiBtn" title="Google Gemini 무료 API 설정">
+            <span class="dot" id="topApiDot"></span>
+            <span id="topApiLabel">무료 Gemini API</span>
+          </button>
+          <button class="icon-btn" id="qrConnectBtn" title="모바일 Safari QR 연결">📱</button>
+          <button class="icon-btn" id="openSettingsBtn" title="환경설정">⚙️</button>
+        </div>
+      </header>
+
+      <!-- Views Container -->
+      <main class="views-container" id="viewsContainer">
+        <!-- 1. HOME / DISCOVER VIEW -->
+        <section class="view active" id="view-home">
+          <!-- Hero Spotlight -->
+          <div class="hero-spotlight" id="heroSpotlight"></div>
+
+          <!-- Genre Filter Pills -->
+          <div class="filter-bar">
+            <div class="genre-tabs" id="genreTabs"></div>
+            <div class="sort-pills">
+              <button class="sort-pill active" data-sort="popular">인기순</button>
+              <button class="sort-pill" data-sort="likes">추천순</button>
+              <button class="sort-pill" data-sort="newest">최신/내 캐릭터</button>
+            </div>
+          </div>
+
+          <!-- Real-time Top Ranking Strip -->
+          <div class="section-block" id="rankingSection">
+            <div class="section-header">
+              <h2>🔥 실시간 인기 TOP</h2>
+              <span class="section-sub">지금 가장 많이 몰입 중인 오리지널 & 애니 스토리</span>
+            </div>
+            <div class="ranking-strip" id="rankingStrip"></div>
+          </div>
+
+          <!-- Major Anime Spotlight Strip on Home -->
+          <div class="section-block" id="homeAnimeBannerSection">
+            <div class="section-header">
+              <h2>🎬 메이저 애니메이션 인기 월드</h2>
+              <button class="ghost-btn small" id="goToAnimeHubBtn">애니 월드 전체 보기 (36+) →</button>
+            </div>
+            <div class="anime-quick-row" id="homeAnimeQuickRow"></div>
+          </div>
+
+          <!-- Main Character Grid -->
+          <div class="section-block">
+            <div class="section-header">
+              <h2 id="gridSectionTitle">✦ 전체 스토리 캐릭터</h2>
+              <button class="ghost-btn small" id="quickCreateBtn">+ 새 캐릭터 만들기</button>
+            </div>
+            <div class="character-grid" id="characterGrid"></div>
+          </div>
+        </section>
+
+        <!-- 1.5. ANIME UNIVERSE HUB VIEW -->
+        <section class="view" id="view-anime">
+          <div class="view-page-header">
+            <div>
+              <h1>🎬 애니 월드 · 메이저 애니메이션 아카이브</h1>
+              <p>주술회전·귀멸의 칼날·원피스·진격의 거인·프리렌·나혼렙·포켓몬 등 36+ 인기 애니 캐릭터 챗 & 멀티캐릭터 세계관 시뮬!</p>
+            </div>
+            <span class="badge-original" id="animeTotalBadge">총 36개 애니 월드 탑재</span>
+          </div>
+
+          <!-- Instant Any-Anime Summoner -->
+          <div class="anime-summon-card">
+            <div class="anime-summon-head">
+              <span class="badge-glow">⚡ AI 애니 무한 소환기</span>
+              <strong>목록에 없는 애니메이션도 작품명만 입력하면 5초 만에 원작 고증 캐릭터/세계관 소환!</strong>
+            </div>
+            <div class="anime-summon-grid">
+              <input type="text" id="summonAnimeTitle" placeholder="애니 작품명 * (예: 약사의 혼잣말, 무직전생, 베르세르크, 페어리테일)" />
+              <input type="text" id="summonCharName" placeholder="캐릭터명 (선택 · 비우면 대표 캐릭/전체)" />
+              <select id="summonPlayStyle">
+                <option value="world">🌍 세계관 시뮬 (멀티캐릭 RPG)</option>
+                <option value="character">👤 1:1 캐릭터 몰입 챗</option>
+              </select>
+              <button class="primary-btn" id="summonAnimeBtn">⚡ 즉시 소환 & 시작</button>
+            </div>
+            <div class="summon-extra-row">
+              <input type="text" id="summonExtraPrompt" placeholder="원하는 시작 시점이나 IF 설정 (선택 · 예: 2기 시부야 직전 시점, 원작 비극 막는 IF 루트)" />
+            </div>
+            <div class="summon-quick-chips" id="summonQuickChips">
+              <span class="chip-label">원클릭 소환 예시:</span>
+              <button type="button" class="quick-summon-chip" data-anime="무직전생" data-char="루데우스 & 로키시" data-style="world">무직전생 세계관</button>
+              <button type="button" class="quick-summon-chip" data-anime="주술회전" data-char="료멘스쿠나" data-style="character">주술회전 · 스쿠나</button>
+              <button type="button" class="quick-summon-chip" data-anime="귀멸의 칼날" data-char="코쵸우 시노부" data-style="character">귀멸 · 시노부</button>
+              <button type="button" class="quick-summon-chip" data-anime="원피스" data-char="샹크스" data-style="character">원피스 · 샹크스</button>
+              <button type="button" class="quick-summon-chip" data-anime="전생했더니 슬라임이었던 건에 대하여" data-char="리무루 템페스트" data-style="world">전생슬 · 템페스트</button>
+              <button type="button" class="quick-summon-chip" data-anime="베르세르크" data-char="가츠" data-style="character">베르세르크 · 가츠</button>
+              <button type="button" class="quick-summon-chip" data-anime="장송의 프리렌" data-char="페른" data-style="character">프리렌 · 페른</button>
+            </div>
+          </div>
+
+          <!-- Anime Category & Play Style Filters -->
+          <div class="filter-bar">
+            <div class="genre-tabs" id="animeCategoryTabs"></div>
+            <div class="sort-pills" id="animePlayStylePills">
+              <button class="sort-pill active" data-pstyle="all">전체 방식</button>
+              <button class="sort-pill" data-pstyle="character">👤 1:1 캐릭터 챗</button>
+              <button class="sort-pill" data-pstyle="world">🌍 세계관 시뮬 RPG</button>
+            </div>
+          </div>
+
+          <!-- Series Quick Ribbon -->
+          <div class="anime-series-ribbon" id="animeSeriesRibbon"></div>
+
+          <!-- Anime Grid -->
+          <div class="section-block">
+            <div class="section-header">
+              <h2 id="animeGridHeading">🎬 전체 메이저 애니메이션 월드</h2>
+              <span class="section-sub" id="animeGridCount"></span>
+            </div>
+            <div class="character-grid" id="animeGrid"></div>
+          </div>
+        </section>
+
+        <!-- 2. MY CHATS LIST VIEW -->
+        <section class="view" id="view-chats">
+          <div class="view-page-header">
+            <div>
+              <h1>💬 내 채팅 목록</h1>
+              <p>진행 중인 모든 이야기를 이어서 읽거나 새 회차를 시작할 수 있어요.</p>
+            </div>
+            <button class="primary-btn" id="chatsExploreBtn">새 이야기 찾기</button>
+          </div>
+          <div class="sessions-list-grid" id="sessionsListGrid"></div>
+        </section>
+
+        <!-- 3. CHARACTER CREATOR STUDIO VIEW -->
+        <section class="view" id="view-creator">
+          <div class="view-page-header">
+            <div>
+              <h1 id="creatorHeading">🪄 캐릭터 스튜디오</h1>
+              <p>나만의 세계관과 AI 캐릭터를 만들고 로어북·첫 인사말까지 완성하세요.</p>
+            </div>
+            <div class="header-btn-group">
+              <label class="ghost-btn file-label">
+                📥 JSON 불러오기
+                <input type="file" id="importCharJsonInput" accept="application/json" hidden />
+              </label>
+              <button class="ghost-btn" id="resetCreatorBtn">초기화</button>
+            </div>
+          </div>
+
+          <!-- AI Auto-Fill Banner -->
+          <div class="ai-wizard-card">
+            <div class="ai-wizard-head">
+              <span class="badge-glow">✨ Gemini 3.8 Flash AI 도우미</span>
+              <strong>아이디어 한 줄로 캐릭터·첫 인사말·로어북 자동 완성</strong>
+            </div>
+            <div class="ai-wizard-row">
+              <input
+                type="text"
+                id="wizardConceptInput"
+                placeholder="예: 비 오는 밤 폐쇄된 미술관에서 깨어난 저주받은 천재 화가, 냉소적이지만 나를 지켜줌"
+              />
+              <button class="primary-btn" id="wizardAutofillBtn">✨ AI 자동 작성</button>
+            </div>
+          </div>
+
+          <div class="creator-layout">
+            <form class="creator-form" id="creatorForm">
+              <input type="hidden" id="charIdInput" />
+
+              <div class="form-card">
+                <h3>1. 기본 프로필 & 이미지</h3>
+                <div class="avatar-picker-row">
+                  <div class="avatar-preview-box">
+                    <img id="creatorAvatarPreview" src="./assets/characters/seodohyun.jpg" alt="캐릭터 미리보기" />
+                  </div>
+                  <div class="avatar-controls">
+                    <label class="secondary-btn file-label">
+                      🖼️ 내 이미지 업로드
+                      <input type="file" id="creatorAvatarFile" accept="image/*" hidden />
+                    </label>
+                    <p class="field-hint">또는 기본 프리셋 일러스트를 선택하세요</p>
+                    <div class="preset-avatar-strip" id="presetAvatarStrip"></div>
+                  </div>
+                </div>
+
+                <div class="form-grid-2">
+                  <label class="field">
+                    <span>캐릭터 이름 *</span>
+                    <input type="text" id="charNameInput" required placeholder="예: 서도현" maxlength="50" />
+                  </label>
+                  <label class="field">
+                    <span>장르 *</span>
+                    <select id="charGenreInput"></select>
+                  </label>
+                </div>
+
+                <div class="form-grid-2">
+                  <label class="field">
+                    <span>원작 애니 작품명 (애니 기반일 경우)</span>
+                    <input type="text" id="charAnimeTitleInput" placeholder="예: 주술회전, 귀멸의 칼날, 원피스 (오리지널이면 비워두기)" maxlength="60" />
+                  </label>
+                  <label class="field">
+                    <span>진행 방식 (1:1 vs 세계관 멀티캐릭)</span>
+                    <select id="charPlayStyleInput">
+                      <option value="character">👤 1:1 캐릭터 몰입 챗</option>
+                      <option value="world">🌍 멀티 캐릭터 세계관 시뮬 (RPG 상태창)</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div class="form-grid-2">
+                  <label class="field">
+                    <span>고유 능력 / 파워 시스템 (선택)</span>
+                    <input type="text" id="charPowerSystemInput" placeholder="예: 주력·영역전개 / 악마의 열매·패기 / 넨 6계통" maxlength="120" />
+                  </label>
+                  <label class="field">
+                    <span>주요 등장인물 (쉼표 구분 · 선택)</span>
+                    <input type="text" id="charCastInput" placeholder="예: 고죠 사토루, 이타도리, 후시구로" />
+                  </label>
+                </div>
+
+                <label class="field">
+                  <span>작품 타이틀 (한 줄 제목) *</span>
+                  <input type="text" id="charTitleInput" required placeholder="예: 계약 종료까지 D-30, 재벌 3세 계약 남편" maxlength="90" />
+                </label>
+
+                <label class="field">
+                  <span>대표 대사 / 서브 소개</span>
+                  <input type="text" id="charSubtitleInput" placeholder='예: “감정은 섞지 않는다고 했을 텐데, 왜 자꾸 거슬리게 굴지.”' maxlength="180" />
+                </label>
+
+                <div class="form-grid-2">
+                  <label class="field">
+                    <span>태그 (쉼표 또는 띄어쓰기)</span>
+                    <input type="text" id="charTagsInput" placeholder="#집착 #혐관 #계약결혼 #로맨스" />
+                  </label>
+                  <label class="field">
+                    <span>초기 관계 / 감정 상태</span>
+                    <div class="inline-2">
+                      <input type="text" id="charStageInput" placeholder="예: 계약 부부 · 1막" />
+                      <input type="text" id="charMoodInput" placeholder="예: 차가운 경계" />
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div class="form-card">
+                <h3>2. 성격 · 세계관 · 첫 인사말</h3>
+                <p class="field-hint"><code>{{user}}</code>는 내 페르소나 이름으로, <code>{{char}}</code>는 캐릭터 이름으로 자동 치환됩니다.</p>
+
+                <label class="field">
+                  <span>세계관 / 시나리오 요약</span>
+                  <textarea id="charWorldInput" rows="2" placeholder="이야기가 시작되는 배경과 두 사람의 상황을 요약해 주세요."></textarea>
+                </label>
+
+                <label class="field">
+                  <span>캐릭터 상세 설정 프롬프트 *</span>
+                  <textarea id="charPersonaInput" rows="6" required placeholder="외모, 성격, 말투, 숨겨진 비밀, 서사 규칙 등을 자세히 적을수록 몰입감이 높아집니다."></textarea>
+                </label>
+
+                <label class="field">
+                  <span>첫 인사말 (오프닝 장면) *</span>
+                  <textarea id="charOpeningInput" rows="6" required placeholder="*지문은 별표로 감싸고* &quot;대사는 큰따옴표로 쓰면&quot; 소설 모드에서 아름답게 렌더링됩니다."></textarea>
+                </label>
+
+                <label class="field">
+                  <span>초기 추천 답변 3개 (줄바꿈으로 구분)</span>
+                  <textarea id="charSuggestionsInput" rows="3" placeholder="첫 장면에서 유저가 선택할 만한 추천 답변을 한 줄에 하나씩 입력"></textarea>
+                </label>
+              </div>
+
+              <div class="form-card">
+                <div class="card-head-row">
+                  <div>
+                    <h3>3. 로어북 (키워드북)</h3>
+                    <p class="field-hint">대화 중 특정 키워드가 등장할 때만 AI 기억에 자동 주입되는 세계관 사전입니다.</p>
+                  </div>
+                  <button type="button" class="secondary-btn small" id="creatorAddLoreBtn">+ 로어북 추가</button>
+                </div>
+                <div id="creatorLoreList" class="lore-edit-list"></div>
+              </div>
+
+              <div class="creator-submit-bar">
+                <button type="button" class="ghost-btn" id="exportCharJsonBtn">📤 JSON 내보내기</button>
+                <div class="submit-right">
+                  <button type="submit" class="primary-btn large">✦ 저장하고 바로 대화 시작</button>
+                </div>
+              </div>
+            </form>
+
+            <!-- Live Preview Card -->
+            <aside class="creator-preview-col">
+              <div class="sticky-preview">
+                <div class="preview-caption">실시간 카드 미리보기</div>
+                <div class="char-card preview-card" id="creatorLiveCard"></div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- 4. LIBRARY & PERSONAS VIEW -->
+        <section class="view" id="view-library">
+          <div class="view-page-header">
+            <div>
+              <h1>🔖 보관함 & 내 페르소나</h1>
+              <p>즐겨찾기한 캐릭터와 이야기 속 내 주인공 프로필을 관리하세요.</p>
+            </div>
+          </div>
+
+          <div class="section-block">
+            <div class="section-header">
+              <h2>👤 내 페르소나 (주인공 프로필)</h2>
+              <button class="primary-btn small" id="addPersonaBtn">+ 새 페르소나</button>
+            </div>
+            <div class="persona-grid" id="personaGrid"></div>
+          </div>
+
+          <div class="section-block">
+            <div class="section-header">
+              <h2>⭐ 즐겨찾기 캐릭터</h2>
+            </div>
+            <div class="character-grid" id="favoritesGrid"></div>
+          </div>
+        </section>
+
+        <!-- 5. IMMERSIVE CHAT / STORY ROOM VIEW -->
+        <section class="view chat-view" id="view-chat">
+          <div class="chat-backdrop" id="chatBackdrop"></div>
+
+          <!-- Chat Top Header -->
+          <header class="chat-header">
+            <div class="chat-header-left">
+              <button class="icon-btn" id="chatBackBtn" title="목록으로">←</button>
+              <img class="chat-char-avatar" id="chatCharAvatar" src="" alt="" />
+              <div class="chat-char-meta">
+                <div class="chat-char-title-row">
+                  <strong id="chatCharName">캐릭터</strong>
+                  <span class="mood-pill" id="chatMoodPill">호기심</span>
+                </div>
+                <div class="chat-affinity-row" id="chatAffinityRow">
+                  <span class="affinity-heart">♥</span>
+                  <div class="affinity-bar">
+                    <div class="affinity-fill" id="chatAffinityFill" style="width: 35%"></div>
+                  </div>
+                  <span class="affinity-val" id="chatAffinityVal">35</span>
+                  <span class="affinity-stage" id="chatAffinityStage">첫 만남</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="chat-header-controls">
+              <div class="segmented" id="viewModeToggle" title="소설형 / 채팅형 전환">
+                <button class="seg-btn active" data-mode="novel"><span>📖</span><span class="seg-text">소설</span></button>
+                <button class="seg-btn" data-mode="chat"><span>💬</span><span class="seg-text">채팅</span></button>
+              </div>
+
+              <select class="compact-select" id="chatAiModeSelect" title="AI 생성 모드">
+                <option value="story">✦ 스토리 (3.8 Flash)</option>
+                <option value="pro">🔥 프로 서사 (High)</option>
+                <option value="speed">⚡ 스피드 (Flash-Lite)</option>
+              </select>
+
+              <button class="pill-btn inspector-toggle-btn" id="toggleInspectorBtn" title="유저노트 · 메모리 · 로어북">
+                <span>⚙️</span><span class="btn-label">스토리 설정</span>
+              </button>
+            </div>
+          </header>
+
+          <!-- Nation Simulation Live Governance HUD (《국가의 시대》 전용) -->
+          <div class="nation-hud-bar" id="nationHudBar" hidden></div>
+
+          <!-- Demo Mode Subtle Notice Banner -->
+          <div class="demo-notice-bar" id="chatDemoBanner" hidden>
+            <span>✨ 현재 <strong>미리보기 모드</strong>로 대화 중입니다. 무료 Google Gemini API 키를 연결하면 진짜 <strong>Gemini 3.8 Flash</strong> AI가 응답해요!</span>
+            <button class="tiny-accent-btn" id="bannerConnectApiBtn">무료 API 키 연결 (30초)</button>
+          </div>
+
+          <!-- Chat Body + Right Inspector Drawer -->
+          <div class="chat-workspace">
+            <div class="chat-main-col">
+              <div class="messages-scroll" id="messagesScroll">
+                <div class="messages-inner mode-novel" id="messagesInner"></div>
+              </div>
+
+              <!-- Suggested Replies Tray (Crack signature feature) -->
+              <div class="suggestions-tray" id="suggestionsTray" hidden>
+                <div class="suggestions-tray-head">
+                  <span>💡 추천 답변 <small>(클릭하면 입력창에 채워져 수정할 수 있어요)</small></span>
+                  <div class="suggestions-tray-actions">
+                    <button class="tiny-ghost-btn" id="refreshSuggestionsBtn">↻ 새로 생성</button>
+                    <button class="tiny-ghost-btn" id="closeSuggestionsBtn">✕</button>
+                  </div>
+                </div>
+                <div class="suggestions-list" id="suggestionsList"></div>
+              </div>
+
+              <!-- Composer Footer -->
+              <div class="composer-wrap">
+                <div class="composer-toolbar">
+                  <button class="tool-chip" id="toggleSuggestionsBtn" title="추천 답변 보기">
+                    💡 추천 답변
+                  </button>
+                  <button class="tool-chip" id="continueBtn" title="유저 입력 없이 캐릭터 이야기 이어쓰기">
+                    ⏩ 이어쓰기
+                  </button>
+                  <button class="tool-chip" id="regenerateLastBtn" title="마지막 답변 다시 생성">
+                    ↺ 재생성
+                  </button>
+                  <div class="toolbar-spacer"></div>
+                  <div class="length-pills" id="lengthPills" title="출력 분량">
+                    <button class="len-pill" data-len="short">짧게</button>
+                    <button class="len-pill active" data-len="medium">보통</button>
+                    <button class="len-pill" data-len="long">길게</button>
+                  </div>
+                </div>
+
+                <div class="composer-box">
+                  <textarea
+                    id="chatInput"
+                    rows="1"
+                    placeholder="대사를 입력하거나 *행동 지문*을 써보세요... (Enter 전송 · Shift+Enter 줄바꿈)"
+                  ></textarea>
+                  <button class="send-btn" id="sendBtn" title="전송">
+                    <span id="sendBtnIcon">➤</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Mobile Backdrop for Inspector Drawer -->
+            <div class="inspector-backdrop" id="inspectorBackdrop" hidden></div>
+
+            <!-- Right Story Inspector Drawer -->
+            <aside class="inspector-drawer" id="inspectorDrawer">
+              <div class="inspector-header">
+                <strong>스토리 설정</strong>
+                <button class="icon-btn small" id="closeInspectorBtn">✕</button>
+              </div>
+              <div class="inspector-tabs">
+                <button class="insp-tab active" data-tab="note">유저노트</button>
+                <button class="insp-tab" data-tab="memory">메모리</button>
+                <button class="insp-tab" data-tab="lore">로어북</button>
+                <button class="insp-tab" data-tab="session">세션</button>
+              </div>
+
+              <div class="inspector-body">
+                <!-- Tab 1: User Note & Affinity -->
+                <div class="insp-pane active" id="insp-note">
+                  <div class="insp-block">
+                    <label class="insp-label">활성 페르소나 (내 프로필)</label>
+                    <select id="sessionPersonaSelect" class="full-select"></select>
+                  </div>
+
+                  <div class="insp-block" id="storyRouteBlock" hidden>
+                    <label class="insp-label">애니 전개 노선 (원작 고증 vs IF 자유 분기)</label>
+                    <div class="segmented full" id="storyRouteToggle">
+                      <button class="seg-btn active" data-route="if">✨ IF 자유 전개</button>
+                      <button class="seg-btn" data-route="canon">📚 원작 고증</button>
+                    </div>
+                    <p class="field-hint">IF 모드에서는 원작의 비극을 막거나 전혀 새로운 해피엔딩으로 분기할 수 있어요.</p>
+                  </div>
+
+                  <div class="insp-block" id="nationModeBlock" hidden>
+                    <label class="insp-label">국가의 시대 진행 모드</label>
+                    <div class="segmented full" id="nationModeToggle">
+                      <button class="seg-btn active" data-nmode="realistic">🏛️ 정통 리얼리티</button>
+                      <button class="seg-btn" data-nmode="surreal">🌀 초현실 변수</button>
+                    </div>
+                    <p class="field-hint">초현실 모드에서는 예측 불가능한 돌발 속보와 기상천외한 외교·정치 이벤트가 쏟아집니다!</p>
+                  </div>
+
+                  <div class="insp-block">
+                    <div class="insp-label-row">
+                      <label class="insp-label">유저노트 (AI 최우선 반영)</label>
+                      <span class="char-counter" id="userNoteCounter">0 / 2000</span>
+                    </div>
+                    <textarea
+                      id="sessionUserNote"
+                      rows="7"
+                      maxlength="2000"
+                      placeholder="예: 현재 우리는 폭우를 피해 별장에 갇혀 있다. {{char}}는 {{user}}에게 반말을 쓰며, 절대 먼저 마음을 고백하지 않는다."
+                    ></textarea>
+                    <button class="secondary-btn full" id="saveUserNoteBtn">유저노트 저장</button>
+                  </div>
+
+                  <div class="insp-block">
+                    <div class="insp-label-row">
+                      <label class="insp-label">호감도 & 감정 상태</label>
+                      <span id="inspAffinityValue">35 / 100</span>
+                    </div>
+                    <input type="range" id="inspAffinityRange" min="0" max="100" value="35" />
+                    <input type="text" id="inspMoodInput" class="full-input" placeholder="현재 감정 상태 (예: 흔들리는 시선)" />
+                    <button class="ghost-btn full small" id="saveStateBtn">감정·호감도 반영</button>
+                  </div>
+                </div>
+
+                <!-- Tab 2: Summary Memory -->
+                <div class="insp-pane" id="insp-memory">
+                  <div class="insp-block">
+                    <p class="field-hint">대화가 길어져도 핵심 사건과 약속을 기억하도록 유지하는 장기 요약 메모리입니다.</p>
+                    <button class="primary-btn full" id="autoSummarizeBtn">✨ AI 요약 메모리 지금 갱신</button>
+                  </div>
+                  <div class="insp-block">
+                    <label class="insp-label">저장된 요약 메모리</label>
+                    <textarea
+                      id="sessionSummaryInput"
+                      rows="10"
+                      maxlength="2000"
+                      placeholder="아직 저장된 요약 메모리가 없습니다. 위 버튼을 누르거나 직접 핵심 기억을 적어두세요."
+                    ></textarea>
+                    <button class="secondary-btn full" id="saveSummaryBtn">메모리 저장</button>
+                  </div>
+                </div>
+
+                <!-- Tab 3: Lorebook -->
+                <div class="insp-pane" id="insp-lore">
+                  <div class="insp-block">
+                    <p class="field-hint">최근 대화에 키워드가 언급될 때만 자동 발동되어 프롬프트에 주입됩니다.</p>
+                    <button class="secondary-btn full" id="sessionAddLoreBtn">+ 새 로어북 항목 추가</button>
+                  </div>
+                  <div id="sessionLoreList" class="session-lore-list"></div>
+                </div>
+
+                <!-- Tab 4: Session & Display -->
+                <div class="insp-pane" id="insp-session">
+                  <div class="insp-block">
+                    <label class="insp-label">소설 글꼴</label>
+                    <div class="segmented full" id="fontFamilyToggle">
+                      <button class="seg-btn active" data-font="sans">고딕 (모던)</button>
+                      <button class="seg-btn" data-font="serif">명조 (웹소설)</button>
+                    </div>
+                  </div>
+                  <div class="insp-block">
+                    <label class="insp-label">이 캐릭터의 다른 회차</label>
+                    <button class="primary-btn full" id="newSessionSameCharBtn">+ 새 회차(새 대화) 시작</button>
+                    <div id="sameCharSessions" class="mini-session-list"></div>
+                  </div>
+                  <div class="insp-block">
+                    <label class="insp-label">보관 및 관리</label>
+                    <button class="secondary-btn full" id="exportStoryBtn">📖 웹소설(.md) 파일로 저장</button>
+                    <button class="ghost-btn full" id="editCurrentCharBtn">✏️ 캐릭터 설정 수정</button>
+                    <button class="danger-btn full" id="deleteCurrentSessionBtn">🗑️ 현재 채팅방 삭제</button>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Mobile Bottom Tab Bar -->
+    <nav class="mobile-tabbar" id="mobileTabbar">
+      <button class="tab-btn active" data-view="home"><span>✦</span><small>홈</small></button>
+      <button class="tab-btn" data-view="anime"><span>🎬</span><small>애니</small></button>
+      <button class="tab-btn" data-view="chats"><span>💬</span><small>채팅</small></button>
+      <button class="tab-btn" data-view="creator"><span>🪄</span><small>제작</small></button>
+      <button class="tab-btn" data-view="library"><span>🔖</span><small>보관함</small></button>
+    </nav>
+  </div>
+
+  <!-- CHARACTER DETAIL MODAL -->
+  <div class="modal-backdrop" id="charDetailModal" hidden>
+    <div class="modal-card char-detail-modal">
+      <button class="modal-close" data-close="charDetailModal">✕</button>
+      <div class="char-detail-body" id="charDetailBody"></div>
+    </div>
+  </div>
+
+  <!-- SETTINGS & GOOGLE GEMINI FREE API MODAL -->
+  <div class="modal-backdrop" id="settingsModal" hidden>
+    <div class="modal-card settings-modal">
+      <div class="modal-header">
+        <h2>🔑 Google Gemini 무료 API & 환경설정</h2>
+        <button class="modal-close" data-close="settingsModal">✕</button>
+      </div>
+      <div class="modal-content">
+        <div class="api-guide-box">
+          <div class="api-guide-top">
+            <div>
+              <span class="badge-free">100% FREE TIER</span>
+              <h3>가장 좋은 무료 구글 AI: Gemini 3.8 Flash</h3>
+            </div>
+            <a
+              href="https://aistudio.google.com/apikey"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="primary-btn small"
+            >
+              무료 API 키 발급받기 ↗
+            </a>
+          </div>
+          <ol class="guide-steps">
+            <li>오른쪽 <strong>[무료 API 키 발급받기]</strong>를 눌러 Google AI Studio에 구글 계정으로 로그인 (카드 등록 불필요)</li>
+            <li><strong>Create API key</strong> 클릭 후 생성된 <code>AIza...</code> 키를 복사</li>
+            <li>아래 입력창에 붙여넣고 <strong>[연결 테스트 & 저장]</strong> 클릭하면 즉시 최고 성능 무료 모델로 자동 연결!</li>
+          </ol>
+        </div>
+
+        <label class="field">
+          <span>Google Gemini API 키</span>
+          <div class="key-input-row">
+            <input
+              type="password"
+              id="settingsApiKeyInput"
+              placeholder="AIzaSy... (비워두면 기존 키 유지)"
+              autocomplete="off"
+            />
+            <button type="button" class="secondary-btn" id="verifyApiKeyBtn">연결 테스트 & 저장</button>
+          </div>
+          <div class="verify-status" id="verifyStatusMsg"></div>
+        </label>
+
+        <div class="form-grid-2">
+          <label class="field">
+            <span>기본 무료 Gemini 모델</span>
+            <select id="settingsModelSelect"></select>
+          </label>
+          <label class="field">
+            <span>기본 AI 서사 모드</span>
+            <select id="settingsModeSelect">
+              <option value="story">스토리 (Gemini 3.8 Flash · 균형)</option>
+              <option value="pro">프로 서사 (Gemini 3.8 Flash · 고품질)</option>
+              <option value="speed">스피드 (Gemini 3.5 Flash-Lite · 초고속)</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="model-cards-info" id="modelCardsInfo"></div>
+
+        <div class="cloud-backup-box" id="cloudBackupBox" hidden>
+          <div style="font-size:12.5px;font-weight:700;color:#e9d5ff;margin-bottom:6px;">☁️ 24/7 클라우드 웹 데이터 백업 · 기기 이동</div>
+          <p class="field-hint" style="margin-bottom:10px;">채팅 기록·내가 만든 캐릭터·소환한 애니·페르소나는 브라우저에 안전하게 저장됩니다. 다른 기기로 옮길 때 백업/복원하세요.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="secondary-btn small" id="exportCloudBackupBtn">💾 전체 데이터 백업(.json)</button>
+            <label class="ghost-btn small file-label">
+              📥 백업 복원하기
+              <input type="file" id="importCloudBackupInput" accept="application/json" hidden />
+            </label>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="ghost-btn danger-text" id="clearApiKeyBtn">저장된 키 삭제</button>
+          <div class="footer-right">
+            <button class="ghost-btn" data-close="settingsModal">닫기</button>
+            <button class="primary-btn" id="saveSettingsBtn">설정 저장</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MOBILE QR CONNECT MODAL -->
+  <div class="modal-backdrop" id="qrModal" hidden>
+    <div class="modal-card qr-modal">
+      <div class="modal-header">
+        <h2>📱 모바일 / 웹 사이트 접속</h2>
+        <button class="modal-close" data-close="qrModal">✕</button>
+      </div>
+      <div class="modal-content qr-content">
+        <p>같은 Wi-Fi에 연결된 아이폰·안드로이드 카메라로 스캔하면 바로 사이트로 열립니다.<br />Safari에서 <strong>공유 → 홈 화면에 추가</strong>하면 모바일 앱처럼 쓸 수 있어요!</p>
+        <div class="qr-box" id="qrSvgContainer"></div>
+        <div class="url-list" id="networkUrlList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PERSONA EDIT MODAL -->
+  <div class="modal-backdrop" id="personaModal" hidden>
+    <div class="modal-card small-modal">
+      <div class="modal-header">
+        <h2 id="personaModalTitle">👤 페르소나 설정</h2>
+        <button class="modal-close" data-close="personaModal">✕</button>
+      </div>
+      <form class="modal-content" id="personaForm">
+        <input type="hidden" id="personaIdInput" />
+        <div class="form-grid-2">
+          <label class="field">
+            <span>이름 ({{user}}) *</span>
+            <input type="text" id="personaNameInput" required placeholder="예: 현준" maxlength="40" />
+          </label>
+          <label class="field">
+            <span>성별 / 호칭</span>
+            <input type="text" id="personaGenderInput" placeholder="예: 남성 / 여성 / 미지정" maxlength="20" />
+          </label>
+        </div>
+        <label class="field">
+          <span>내 캐릭터 설명 (외모, 성격, 배경)</span>
+          <textarea id="personaDescInput" rows="4" placeholder="AI가 나를 어떻게 인식하고 대할지 적어주세요."></textarea>
+        </label>
+        <div class="modal-footer">
+          <span></span>
+          <div class="footer-right">
+            <button type="button" class="ghost-btn" data-close="personaModal">취소</button>
+            <button type="submit" class="primary-btn">저장</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-stack" id="toastStack"></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "CRACK AI · 인터랙티브 캐릭터 챗",
+  "short_name": "CRACK",
+  "description": "웹소설처럼 빠져드는 AI 캐릭터 챗 · 메이저 애니 41종 · 국가의 시대 시뮬레이션",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#09090F",
+  "theme_color": "#09090F",
+  "icons": [
+    {
+      "src": "./assets/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

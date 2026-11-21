@@ -1,0 +1,19 @@
+{
+  "name": "crack-ai",
+  "version": "1.0.0",
+  "description": "CRACK 스타일 AI 캐릭터 챗 & 인터랙티브 웹소설 스토리 플랫폼 (Google Gemini 무료 API · macOS 앱 + 웹/모바일 PWA)",
+  "type": "module",
+  "bin": {
+    "crack-ai": "./bin/crack-ai.mjs"
+  },
+  "scripts": {
+    "start": "node ./bin/crack-ai.mjs server",
+    "test": "node --test test/*.test.mjs",
+    "build:web": "node ./scripts/build_web.mjs",
+    "build:app": "node ./scripts/build_web.mjs && bash ./macos/build_app.sh",
+    "deploy:netlify": "bash ./scripts/deploy_netlify.sh"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
