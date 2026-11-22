@@ -767,6 +767,7 @@ export function createAppServer({ port = getPort() } = {}) {
         if (typeof body.geminiApiKey === 'string') allowed.geminiApiKey = body.geminiApiKey.trim();
         if (typeof body.defaultModel === 'string') allowed.defaultModel = body.defaultModel.trim();
         if (typeof body.defaultMode === 'string') allowed.defaultMode = body.defaultMode.trim();
+        if (body.theme === 'dark' || body.theme === 'light') allowed.theme = body.theme;
         if (typeof body.viewMode === 'string') allowed.viewMode = body.viewMode;
         if (typeof body.fontFamily === 'string') allowed.fontFamily = body.fontFamily;
         if (typeof body.fontSize === 'string') allowed.fontSize = body.fontSize;

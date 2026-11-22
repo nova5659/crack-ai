@@ -387,3 +387,38 @@ test('Static web catalog bundle contains all 50 built-in worlds including 《국
   assert.equal(fs.existsSync(new URL('../web/.nojekyll', import.meta.url)), true);
 });
 
+test('Theme switching (True Black Dark Mode #000000 & Light Mode) persists via /api/config and CSS tokens', async () => {
+  const server = createAppServer({ port: 0 });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const cfg0 = await (await fetch(`${base}/api/config`)).json();
+    assert.equal(cfg0.theme, 'dark');
+
+    const cfgLight = await (
+      await fetch(`${base}/api/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: 'light' }),
+      })
+    ).json();
+    assert.equal(cfgLight.theme, 'light');
+
+    const cfgDark = await (
+      await fetch(`${base}/api/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: 'dark' }),
+      })
+    ).json();
+    assert.equal(cfgDark.theme, 'dark');
+
+    const css = fs.readFileSync(new URL('../web/css/styles.css', import.meta.url), 'utf8');
+    assert.ok(css.includes('--bg-0: #000000;'), 'Dark mode must use true pure black #000000');
+    assert.ok(css.includes(':root[data-theme="light"]'), 'Light mode CSS token overrides must exist');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+

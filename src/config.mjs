@@ -102,6 +102,7 @@ const DEFAULT_CONFIG = {
   geminiApiKey: '',
   defaultModel: process.env.GEMINI_DEFAULT_MODEL || 'gemini-3.5-flash-lite',
   defaultMode: 'story',
+  theme: 'dark', // 'dark' (true OLED black) | 'light'
   viewMode: 'novel', // 'novel' | 'chat'
   fontFamily: 'sans', // 'sans' | 'serif'
   fontSize: 'md', // 'sm' | 'md' | 'lg'
@@ -229,6 +230,7 @@ export function getPublicConfig() {
     keySource: cfg.geminiApiKey ? 'settings' : (effectiveKey ? 'env' : 'none'),
     defaultModel: cfg.defaultModel,
     defaultMode: cfg.defaultMode,
+    theme: cfg.theme === 'light' ? 'light' : 'dark',
     viewMode: cfg.viewMode,
     fontFamily: cfg.fontFamily,
     fontSize: cfg.fontSize || 'md',

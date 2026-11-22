@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
   private var window: NSWindow!
   private var webView: WKWebView!
   private var statusItem: NSStatusItem!
@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   private func setupWindow() {
     let config = WKWebViewConfiguration()
     config.defaultWebpagePreferences.allowsContentJavaScript = true
+    config.userContentController.add(self, name: "themeChanged")
 
     webView = WKWebView(frame: .zero, configuration: config)
     webView.navigationDelegate = self
@@ -107,12 +108,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     window.title = "CRACK · AI 캐릭터 챗 & 인터랙티브 스토리"
     window.minSize = NSSize(width: 440, height: 640)
     window.center()
-    window.backgroundColor = NSColor(calibratedRed: 0.031, green: 0.031, blue: 0.055, alpha: 1.0)
+    window.backgroundColor = NSColor.black
     window.appearance = NSAppearance(named: .darkAqua)
     window.delegate = self
     window.contentView = webView
     window.makeKeyAndOrderFront(nil)
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+    guard message.name == "themeChanged", let theme = message.body as? String else { return }
+    DispatchQueue.main.async { [weak self] in
+      guard let self, let win = self.window else { return }
+      if theme == "light" {
+        win.appearance = NSAppearance(named: .aqua)
+        win.backgroundColor = NSColor(calibratedRed: 0.96, green: 0.96, blue: 0.97, alpha: 1.0)
+      } else {
+        win.appearance = NSAppearance(named: .darkAqua)
+        win.backgroundColor = NSColor.black
+      }
+    }
   }
 
   // MARK: - Server Lifecycle
@@ -243,8 +258,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
   private func showErrorPage(_ message: String) {
     let html = """
-    <html><body style="background:#08080e;color:#f6f6fc;font-family:-apple-system;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;">
-    <div><h2>CRACK AI 시작 오류</h2><p style="color:#9e9eb8;">\(message)</p></div>
+    <html><body style="background:#000000;color:#f5f5f5;font-family:-apple-system;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;">
+    <div><h2>CRACK AI 시작 오류</h2><p style="color:#999999;">\(message)</p></div>
     </body></html>
     """
     webView.loadHTMLString(html, baseURL: nil)

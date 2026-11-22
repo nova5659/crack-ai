@@ -50,6 +50,7 @@ const state = {
   activeSession: null,
   activeCharacter: null,
   activePersona: null,
+  theme: (typeof localStorage !== 'undefined' && localStorage.getItem('crack_theme') === 'light') ? 'light' : 'dark',
   viewMode: 'novel',
   fontFamily: 'sans',
   fontSize: 'md',
@@ -226,6 +227,7 @@ function showToast(message, type = 'info') {
 // BOOTSTRAP
 // ================================
 async function init() {
+  setTheme(state.theme, false);
   bindStaticEvents();
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
@@ -246,6 +248,9 @@ async function init() {
     state.sessions = sessData.sessions || [];
     state.personas = persData.personas || [];
 
+    if (cfg.theme === 'light' || cfg.theme === 'dark') {
+      setTheme(cfg.theme, false);
+    }
     state.viewMode = cfg.viewMode || 'novel';
     state.fontFamily = cfg.fontFamily || 'sans';
     state.fontSize = cfg.fontSize || 'md';
@@ -457,12 +462,22 @@ function bindStaticEvents() {
     });
   });
 
-  // Modals open/close
+  // Modals open/close & Theme toggles
   $('#sidebarApiBtn').addEventListener('click', openSettingsModal);
   $('#topApiBtn').addEventListener('click', openSettingsModal);
   $('#openSettingsBtn').addEventListener('click', openSettingsModal);
   $('#bannerConnectApiBtn').addEventListener('click', openSettingsModal);
   $('#qrConnectBtn').addEventListener('click', openQrModal);
+  $$('.theme-toggle-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setTheme(state.theme === 'dark' ? 'light' : 'dark', true, true);
+    });
+  });
+  $$('#themeModeToggle .seg-btn, #settingsThemeToggle .seg-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setTheme(btn.dataset.theme, true, true);
+    });
+  });
 
   $$('[data-close]').forEach((btn) => {
     btn.addEventListener('click', () => closeModal(btn.dataset.close));
@@ -851,6 +866,7 @@ function openSettingsModal() {
     : '키를 입력하지 않아도 미리보기 모드로 앱을 체험할 수 있습니다.';
 
   $('#cloudBackupBox').hidden = state.runtimeMode !== 'cloud';
+  $$('#settingsThemeToggle .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.theme === state.theme));
   $('#settingsModal').hidden = false;
 }
 
@@ -947,7 +963,7 @@ async function openQrModal() {
       $('#networkUrlList').innerHTML = `
         <div class="url-copy-row">
           <div style="min-width:0;text-align:left;">
-            <div style="font-size:10.5px;color:#6ee7b7;font-weight:700;">☁️ 24시간 상시 클라우드 웹 주소 (컴퓨터 꺼져도 접속 가능)</div>
+            <div class="qr-cloud-label">☁️ 24시간 상시 클라우드 웹 주소 (컴퓨터 꺼져도 접속 가능)</div>
             <code>${escapeHtml(net.lanUrl)}</code>
           </div>
           <button class="tiny-ghost-btn" data-copy="${escapeHtml(net.lanUrl)}">복사</button>
@@ -1489,8 +1505,8 @@ function openCharDetailModal(charId) {
           <span class="badge-genre">📖 로어북 ${(c.lorebook || []).length}개</span>
         </div>
         <h2>${escapeHtml(c.name)}</h2>
-        <div style="font-size:14px;font-weight:700;color:#e4e4f7;">${escapeHtml(c.title)}</div>
-        ${c.powerSystem ? `<div style="font-size:12px;color:#a5b4fc;">⚡ 고유 시스템: ${escapeHtml(c.powerSystem)}</div>` : ''}
+        <div class="detail-subtitle-title">${escapeHtml(c.title)}</div>
+        ${c.powerSystem ? `<div class="detail-power-line">⚡ 고유 시스템: ${escapeHtml(c.powerSystem)}</div>` : ''}
         ${c.castMembers?.length ? `<div style="font-size:12px;color:var(--text-2);">👥 주요 등장인물: ${escapeHtml(c.castMembers.join(' · '))}</div>` : ''}
         <p class="detail-quote">${escapeHtml(c.subtitle || '')}</p>
         <p class="detail-world">${escapeHtml(c.worldSummary || '')}</p>
@@ -1647,7 +1663,7 @@ function renderChatsView() {
           <span class="session-card-name">${escapeHtml(s.characterName)}</span>
           ${s.ending ? endingMiniBadgeHtml(s.ending) : `<span class="mood-pill">${escapeHtml(s.mood || '진행 중')}</span>`}
         </div>
-        <div style="font-size:12px;color:#c4b5fd;font-weight:600;">${escapeHtml(s.ending ? `🏆 ${s.ending.title}` : s.characterTitle)}</div>
+        <div class="session-card-title">${escapeHtml(s.ending ? `🏆 ${s.ending.title}` : s.characterTitle)}</div>
         <div class="session-card-preview">${escapeHtml(s.ending ? s.ending.summary : s.lastPreview)}</div>
         <div class="session-card-meta">
           <span>♥ ${s.affinity}</span>
@@ -1826,6 +1842,39 @@ function updateComposerEndingState(session) {
     input.placeholder = '완결된 이야기입니다 · 엔딩 카드에서 [재도전]하거나 [자유 이어쓰기]를 선택하세요';
   } else {
     input.placeholder = '대사를 입력하거나 *행동 지문*을 써보세요... (Enter 전송 · Shift+Enter 줄바꿈)';
+  }
+}
+
+function setTheme(theme, persist = true, notify = false) {
+  const next = theme === 'light' ? 'light' : 'dark';
+  state.theme = next;
+  document.documentElement.dataset.theme = next;
+  try {
+    localStorage.setItem('crack_theme', next);
+  } catch { /* ignore storage restrictions */ }
+
+  const meta = document.getElementById('metaThemeColor');
+  if (meta) meta.setAttribute('content', next === 'light' ? '#F5F5F7' : '#000000');
+
+  try {
+    window.webkit?.messageHandlers?.themeChanged?.postMessage(next);
+  } catch { /* ignore outside WKWebView */ }
+
+  $$('.theme-toggle-btn').forEach((btn) => {
+    btn.textContent = next === 'dark' ? '☀️' : '🌙';
+    btn.title = next === 'dark' ? '라이트 모드로 전환' : '리얼 블랙 다크 모드로 전환';
+  });
+  $$('#themeModeToggle .seg-btn, #settingsThemeToggle .seg-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.theme === next);
+  });
+
+  if (persist) {
+    api.updateConfig({ theme: next }).then((cfg) => {
+      if (cfg) state.config = cfg;
+    }).catch(() => {});
+  }
+  if (notify) {
+    showToast(next === 'light' ? '☀️ 라이트 모드로 전환했습니다.' : '🖤 리얼 블랙 다크 모드로 전환했습니다.');
   }
 }
 
@@ -2694,7 +2743,7 @@ async function refreshSuggestions(force = true) {
     scrollToBottom(true);
   } catch (err) {
     if (state.activeSession?.id !== targetSessionId) return;
-    listEl.innerHTML = `<div class="field-hint" style="color:#fda4af;">${escapeHtml(humanizeError(err))}</div>`;
+    listEl.innerHTML = `<div class="field-hint err-hint">${escapeHtml(humanizeError(err))}</div>`;
   }
 }
 

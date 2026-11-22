@@ -3,11 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#08080E" />
+  <meta name="theme-color" id="metaThemeColor" content="#000000" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="CRACK" />
   <title>CRACK · AI 캐릭터 챗 & 인터랙티브 스토리</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('crack_theme') === 'light' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = t;
+        var m = document.getElementById('metaThemeColor');
+        if (m) m.setAttribute('content', t === 'light' ? '#F5F5F7' : '#000000');
+      } catch (_) {}
+    })();
+  </script>
   <link rel="manifest" href="./manifest.json" />
   <link rel="icon" type="image/svg+xml" href="./assets/icons/icon.svg" />
   <link rel="apple-touch-icon" href="./assets/icons/icon.svg" />
@@ -106,6 +116,7 @@
             <span class="dot" id="topApiDot"></span>
             <span id="topApiLabel">무료 Gemini API</span>
           </button>
+          <button class="icon-btn theme-toggle-btn" id="themeToggleBtn" title="라이트 모드로 전환" aria-label="테마 전환">☀️</button>
           <button class="icon-btn" id="qrConnectBtn" title="모바일 Safari QR 연결">📱</button>
           <button class="icon-btn" id="openSettingsBtn" title="환경설정">⚙️</button>
         </div>
@@ -488,6 +499,8 @@
                 <option value="speed">💨 초고속</option>
               </select>
 
+              <button type="button" class="icon-btn chat-theme-btn theme-toggle-btn" id="chatThemeToggleBtn" title="라이트 모드로 전환" aria-label="테마 전환">☀️</button>
+
               <button type="button" class="pill-btn chat-reset-btn" id="chatResetBtn" title="처음부터 다시 시작 (대화 초기화)">
                 <span>🔄</span><span class="btn-label">처음부터</span>
               </button>
@@ -716,10 +729,17 @@
                     </div>
                   </div>
                   <div class="insp-block">
-                    <label class="insp-label">배경 일러스트 밝기</label>
+                    <label class="insp-label">화면 테마 (다크 / 라이트)</label>
+                    <div class="segmented full" id="themeModeToggle">
+                      <button class="seg-btn active" data-theme="dark">🖤 리얼 블랙</button>
+                      <button class="seg-btn" data-theme="light">☀️ 라이트</button>
+                    </div>
+                  </div>
+                  <div class="insp-block">
+                    <label class="insp-label">배경 일러스트 표시</label>
                     <div class="segmented full" id="backdropToggle">
-                      <button class="seg-btn active" data-bmode="dim">🌙 은은하게 (독서 집중)</button>
-                      <button class="seg-btn" data-bmode="vivid">✨ 선명하게 (몰입 배경)</button>
+                      <button class="seg-btn active" data-bmode="dim">🖤 순수 배경 (집중)</button>
+                      <button class="seg-btn" data-bmode="vivid">✨ 일러스트 배경</button>
                     </div>
                   </div>
                   <div class="insp-block">
@@ -823,10 +843,18 @@
           </label>
         </div>
 
+        <div class="field">
+          <span>화면 테마 (다크 / 라이트 모드)</span>
+          <div class="segmented full" id="settingsThemeToggle">
+            <button type="button" class="seg-btn active" data-theme="dark">🖤 리얼 블랙 (다크)</button>
+            <button type="button" class="seg-btn" data-theme="light">☀️ 라이트 모드</button>
+          </div>
+        </div>
+
         <div class="model-cards-info" id="modelCardsInfo"></div>
 
         <div class="cloud-backup-box" id="cloudBackupBox" hidden>
-          <div style="font-size:12.5px;font-weight:700;color:#e9d5ff;margin-bottom:6px;">☁️ 24/7 클라우드 웹 데이터 백업 · 기기 이동</div>
+          <div class="cloud-backup-title">☁️ 24/7 클라우드 웹 데이터 백업 · 기기 이동</div>
           <p class="field-hint" style="margin-bottom:10px;">채팅 기록·내가 만든 캐릭터·소환한 애니·페르소나는 브라우저에 안전하게 저장됩니다. 다른 기기로 옮길 때 백업/복원하세요.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button type="button" class="secondary-btn small" id="exportCloudBackupBtn">💾 전체 데이터 백업(.json)</button>
