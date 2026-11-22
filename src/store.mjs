@@ -46,8 +46,15 @@ function readJson(filePath, fallback) {
 function writeJsonAtomic(filePath, data) {
   ensureDataDirs();
   const tmp = `${filePath}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-  fs.renameSync(tmp, filePath);
+  const payload = JSON.stringify(data, null, 2);
+  fs.writeFileSync(tmp, payload, 'utf8');
+  try {
+    fs.renameSync(tmp, filePath);
+  } catch {
+    // Windows antivirus / Defender can momentarily lock the target file during rename
+    fs.writeFileSync(filePath, payload, 'utf8');
+    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+  }
 }
 
 export function makeId(prefix = 'id') {

@@ -203,8 +203,14 @@ export function writeConfig(partial) {
     ...cleaned,
   };
   const tmpPath = `${CONFIG_PATH}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2), 'utf8');
-  fs.renameSync(tmpPath, CONFIG_PATH);
+  const payload = JSON.stringify(next, null, 2);
+  fs.writeFileSync(tmpPath, payload, 'utf8');
+  try {
+    fs.renameSync(tmpPath, CONFIG_PATH);
+  } catch {
+    fs.writeFileSync(CONFIG_PATH, payload, 'utf8');
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+  }
   return next;
 }
 

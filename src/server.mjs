@@ -733,8 +733,9 @@ async function handleAutofillCharacter(req, res) {
 }
 
 export function createAppServer({ port = getPort() } = {}) {
-  return http.createServer(async (req, res) => {
-    const urlObj = new URL(req.url || '/', `http://127.0.0.1:${port}`);
+  const server = http.createServer(async (req, res) => {
+    const activePort = (server.address && typeof server.address() === 'object' && server.address()?.port) || port;
+    const urlObj = new URL(req.url || '/', `http://127.0.0.1:${activePort}`);
     const pathname = decodeURIComponent(urlObj.pathname);
     const method = req.method || 'GET';
 
@@ -745,7 +746,7 @@ export function createAppServer({ port = getPort() } = {}) {
         return sendJson(res, 200, {
           ok: true,
           app: 'CRACK AI',
-          port,
+          port: activePort,
           hasApiKey: cfg.hasApiKey,
           defaultModel: cfg.defaultModel,
           characterCount: listCharacters().length,
@@ -754,7 +755,7 @@ export function createAppServer({ port = getPort() } = {}) {
       }
 
       if (pathname === '/api/network' && method === 'GET') {
-        return sendJson(res, 200, getNetworkInfo(port));
+        return sendJson(res, 200, getNetworkInfo(activePort));
       }
 
       if (pathname === '/api/config' && method === 'GET') {
@@ -1039,10 +1040,15 @@ export function createAppServer({ port = getPort() } = {}) {
         return sendError(res, 404, '파일을 찾을 수 없습니다.');
       }
 
-      // Static frontend files
-      const normalized = path.normalize(pathname).replace(/^(\.\.[/\\])+/, '');
-      const candidatePath = path.join(WEB_DIR, normalized === '/' ? 'index.html' : normalized);
-      if (candidatePath.startsWith(WEB_DIR) && serveStaticFile(res, candidatePath)) {
+      // Static frontend files (cross-platform Windows & POSIX safe)
+      const relPath = pathname.replace(/^[/\\]+/, '');
+      const normalized = relPath ? path.normalize(relPath).replace(/^(\.\.[/\\])+/, '') : 'index.html';
+      const candidatePath = path.resolve(WEB_DIR, normalized === '.' ? 'index.html' : normalized);
+      const resolvedWebDir = path.resolve(WEB_DIR);
+      if (
+        (candidatePath === resolvedWebDir || candidatePath.startsWith(resolvedWebDir + path.sep)) &&
+        serveStaticFile(res, candidatePath)
+      ) {
         return;
       }
 
@@ -1059,6 +1065,7 @@ export function createAppServer({ port = getPort() } = {}) {
       }
     }
   });
+  return server;
 }
 
 export function startServer({ port = getPort(), host = '0.0.0.0' } = {}) {
@@ -1066,7 +1073,8 @@ export function startServer({ port = getPort(), host = '0.0.0.0' } = {}) {
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
-      resolve({ server, port, network: getNetworkInfo(port) });
+      const actualPort = server.address()?.port || port;
+      resolve({ server, port: actualPort, network: getNetworkInfo(actualPort) });
     });
   });
 }

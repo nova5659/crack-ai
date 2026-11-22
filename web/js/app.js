@@ -825,7 +825,8 @@ function openSettingsModal() {
   if (runtimeBadge) {
     const host = window.location.hostname || '';
     if (state.runtimeMode === 'local') {
-      runtimeBadge.textContent = '💻 Mac 로컬 서버';
+      const isWin = window.crackDesktop?.platform === 'win32' || /Windows/i.test(navigator.userAgent);
+      runtimeBadge.textContent = isWin ? '🪟 Windows PC 로컬 앱' : '💻 Mac 로컬 서버';
     } else if (host.endsWith('.github.io')) {
       runtimeBadge.textContent = '☁️ GitHub Pages · Google 직통';
     } else {
@@ -1858,7 +1859,8 @@ function setTheme(theme, persist = true, notify = false) {
 
   try {
     window.webkit?.messageHandlers?.themeChanged?.postMessage(next);
-  } catch { /* ignore outside WKWebView */ }
+    window.crackDesktop?.setTheme?.(next);
+  } catch { /* ignore outside desktop wrapper */ }
 
   $$('.theme-toggle-btn').forEach((btn) => {
     btn.textContent = next === 'dark' ? '☀️' : '🌙';

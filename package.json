@@ -11,6 +11,7 @@
     "test": "node --test test/*.test.mjs",
     "build:web": "node ./scripts/build_web.mjs",
     "build:app": "node ./scripts/build_web.mjs && bash ./macos/build_app.sh",
+    "build:win": "node ./scripts/build_web.mjs && node ./windows/build_windows.mjs",
     "deploy:netlify": "bash ./scripts/deploy_netlify.sh"
   },
   "engines": {

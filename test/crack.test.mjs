@@ -25,7 +25,7 @@ const {
   sanitizeApiKey,
 } = await import('../src/gemini.mjs');
 const { generateQrSvg } = await import('../src/qr.mjs');
-const { createAppServer } = await import('../src/server.mjs');
+const { createAppServer, startServer } = await import('../src/server.mjs');
 
 test('Lorebook keyword scanner activates only matching enabled entries', () => {
   const lorebook = [
@@ -419,6 +419,22 @@ test('Theme switching (True Black Dark Mode #000000 & Light Mode) persists via /
     assert.ok(css.includes(':root[data-theme="light"]'), 'Light mode CSS token overrides must exist');
   } finally {
     await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('startServer resolves actual bound port for ephemeral port 0 (Windows fallback) and serves index', async () => {
+  const started = await startServer({ port: 0, host: '127.0.0.1' });
+  try {
+    assert.ok(started.port > 0, 'Ephemeral port must resolve to actual non-zero port');
+    const health = await (await fetch(`http://127.0.0.1:${started.port}/api/health`)).json();
+    assert.equal(health.ok, true);
+    assert.equal(health.port, started.port);
+    const homeRes = await fetch(`http://127.0.0.1:${started.port}/`);
+    assert.equal(homeRes.status, 200);
+    const html = await homeRes.text();
+    assert.ok(html.includes('CRACK'));
+  } finally {
+    await new Promise((resolve) => started.server.close(resolve));
   }
 });
 
