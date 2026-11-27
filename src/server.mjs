@@ -321,6 +321,9 @@ async function handleChatStream(req, res, sessionId) {
         storyArc,
         aiEnding: result.stateUpdate?.ending || null,
         prevEnding: action === 'regenerate' ? null : curr.ending,
+        recentMessages: action === 'regenerate' ? curr.messages.slice(0, -1) : curr.messages,
+        currentOutcome: resolvedOutcome,
+        difficulty: curr.difficulty || 'real',
       });
 
       const meta = {
@@ -768,6 +771,9 @@ export function createAppServer({ port = getPort() } = {}) {
         if (typeof body.geminiApiKey === 'string') allowed.geminiApiKey = body.geminiApiKey.trim();
         if (typeof body.defaultModel === 'string') allowed.defaultModel = body.defaultModel.trim();
         if (typeof body.defaultMode === 'string') allowed.defaultMode = body.defaultMode.trim();
+        if (['short', 'standard', 'long', 'endless'].includes(body.defaultStoryLength)) {
+          allowed.defaultStoryLength = body.defaultStoryLength;
+        }
         if (body.theme === 'dark' || body.theme === 'light') allowed.theme = body.theme;
         if (typeof body.viewMode === 'string') allowed.viewMode = body.viewMode;
         if (typeof body.fontFamily === 'string') allowed.fontFamily = body.fontFamily;
@@ -885,6 +891,7 @@ export function createAppServer({ port = getPort() } = {}) {
           characterId: body.characterId,
           personaId: body.personaId || cfg.activePersonaId,
           title: body.title,
+          storyLength: body.storyLength || cfg.defaultStoryLength || 'standard',
         });
         const character = getCharacter(session.characterId);
         return sendJson(res, 201, { session, character });

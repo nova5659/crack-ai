@@ -615,14 +615,14 @@
                   </div>
 
                   <div class="insp-block">
-                    <label class="insp-label">스토리 완결 분량 (기·승·전·결 엔딩)</label>
+                    <label class="insp-label">스토리 턴 모드 (완결 턴 vs ∞ 무제한 생존)</label>
                     <div class="segmented full" id="storyLengthToggle">
                       <button class="seg-btn" data-slen="short">단편 8턴</button>
                       <button class="seg-btn active" data-slen="standard">표준 14턴</button>
                       <button class="seg-btn" data-slen="long">장편 24턴</button>
-                      <button class="seg-btn" data-slen="endless">∞ 자유</button>
+                      <button class="seg-btn" data-slen="endless">∞ 무제한</button>
                     </div>
-                    <p class="field-hint">목표 턴에 도달하거나 치명적 파국(탄핵·패배·관계 파탄) 시 진엔딩/굿엔딩/새드/배드엔딩으로 완결됩니다.</p>
+                    <p class="field-hint">∞ 무제한 모드는 턴 제한 없이 계속 진행되지만, 치명적 실패 누적·사망·탄핵·파국 시 즉시 💀 게임오버(배드엔딩)로 종료됩니다.</p>
                   </div>
 
                   <div class="insp-block">
@@ -848,6 +848,16 @@
           <div class="segmented full" id="settingsThemeToggle">
             <button type="button" class="seg-btn active" data-theme="dark">🖤 리얼 블랙 (다크)</button>
             <button type="button" class="seg-btn" data-theme="light">☀️ 라이트 모드</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <span>기본 스토리 턴 방식 (새 이야기 시작 시 적용 · 게임오버 상시 활성)</span>
+          <div class="segmented full" id="settingsStoryLengthToggle">
+            <button type="button" class="seg-btn" data-slen="short">단편 8턴</button>
+            <button type="button" class="seg-btn active" data-slen="standard">표준 14턴</button>
+            <button type="button" class="seg-btn" data-slen="long">장편 24턴</button>
+            <button type="button" class="seg-btn" data-slen="endless">∞ 무제한</button>
           </div>
         </div>
 

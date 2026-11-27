@@ -252,6 +252,14 @@ async function main() {
   ensureElectronZip();
   ensureReseditTool();
 
+  // Preserve existing portable-data (user API key / saves) across rebuilds!
+  const portableSrc = path.join(OUTPUT_DIR, 'portable-data');
+  let portableBackup = null;
+  if (fs.existsSync(portableSrc)) {
+    portableBackup = path.join(os.tmpdir(), `crack-portable-backup-${Date.now()}`);
+    fs.cpSync(portableSrc, portableBackup, { recursive: true });
+  }
+
   // Clean output directory
   fs.rmSync(OUTPUT_DIR, { recursive: true, force: true });
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -297,6 +305,12 @@ async function main() {
   fs.copyFileSync(ICON_PATH, path.join(winAppDir, 'icon.ico'));
 
   writeWindowsReadme(OUTPUT_DIR);
+
+  if (portableBackup && fs.existsSync(portableBackup)) {
+    fs.cpSync(portableBackup, path.join(OUTPUT_DIR, 'portable-data'), { recursive: true });
+    fs.rmSync(portableBackup, { recursive: true, force: true });
+    console.log('🔐 Preserved existing portable-data folder across rebuild.');
+  }
 
   console.log('');
   console.log(`✅ Windows app ready: ${OUTPUT_DIR}`);

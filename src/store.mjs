@@ -372,12 +372,21 @@ export function getSession(sessionId) {
   return sessions.find((s) => s.id === sessionId) || null;
 }
 
-export function createSession({ characterId, personaId, title }) {
+const STORY_LENGTH_TURN_DEFAULTS = {
+  short: 8,
+  standard: 14,
+  long: 24,
+  endless: 0,
+};
+
+export function createSession({ characterId, personaId, title, storyLength = 'standard' }) {
   const char = getCharacter(characterId);
   if (!char) throw new Error('캐릭터를 찾을 수 없습니다.');
   const persona = getPersona(personaId);
   const sessions = readSessions();
   const now = new Date().toISOString();
+  const resolvedLength = ['short', 'standard', 'long', 'endless'].includes(storyLength) ? storyLength : 'standard';
+  const resolvedTargetTurns = STORY_LENGTH_TURN_DEFAULTS[resolvedLength] ?? 14;
 
   const opening = renderTemplate(
     char.openingMessage || `*${char.name}이(가) 천천히 고개를 들어 {{user}}를 바라보았다.*\n\n"안녕, {{user}}. 기다리고 있었어."`,
@@ -391,8 +400,8 @@ export function createSession({ characterId, personaId, title }) {
     personaId: persona.id,
     storyRoute: 'if', // 'canon' | 'if'
     nationMode: 'realistic', // 'realistic' | 'crisis'
-    storyLength: 'standard', // 'short' (8) | 'standard' (14) | 'long' (24) | 'endless' (0)
-    targetTurns: 14,
+    storyLength: resolvedLength, // 'short' (8) | 'standard' (14) | 'long' (24) | 'endless' (0)
+    targetTurns: resolvedTargetTurns,
     difficulty: 'real', // 'real' | 'hardcore' | 'story'
     ending: null,
     nationState: char.initialNationState ? structuredClone(char.initialNationState) : null,

@@ -438,3 +438,81 @@ test('startServer resolves actual bound port for ephemeral port 0 (Windows fallb
   }
 });
 
+test('Endless mode removes the 14-turn cap while enforcing real Game Over on fatal collapse or consecutive fails', async () => {
+  // 1. Endless arc never forces final turn even at turn 40
+  const endlessArc = computeStoryArc({
+    storyLength: 'endless',
+    targetTurns: 0,
+    messages: Array.from({ length: 40 }, () => ({ role: 'user', content: '행동' })),
+  });
+  assert.equal(endlessArc.isEndless, true);
+  assert.equal(endlessArc.isFinalTurn, false);
+  assert.equal(endlessArc.turn, 40);
+
+  // 2. Normal surviving turn at turn 40 does NOT auto-end
+  const survive = resolveSessionEnding({
+    character: { isNationSim: false, name: '고죠 사토루' },
+    nextAffinity: 55,
+    storyArc: endlessArc,
+    recentMessages: [{ role: 'model', meta: { outcome: 'success' } }],
+    currentOutcome: 'mixed',
+    difficulty: 'real',
+  });
+  assert.equal(survive, null);
+
+  // 3. 3 consecutive fatal failures in Endless mode trigger automatic GAME OVER!
+  const streakGameOver = resolveSessionEnding({
+    character: { isNationSim: false, name: '고죠 사토루' },
+    nextAffinity: 45,
+    storyArc: endlessArc,
+    recentMessages: [
+      { role: 'model', meta: { outcome: 'fail' } },
+      { role: 'model', meta: { outcome: 'fail' } },
+    ],
+    currentOutcome: 'fail',
+    difficulty: 'real',
+  });
+  assert.ok(streakGameOver, '3 consecutive fails must trigger Game Over even in Endless mode');
+  assert.equal(streakGameOver.type, 'bad');
+  assert.ok(streakGameOver.code.includes('GAME OVER'));
+
+  // 4. Nation collapse in Endless mode triggers immediate GAME OVER
+  const nationCollapse = resolveSessionEnding({
+    character: { isNationSim: true, name: '국가의 시대' },
+    nextNationState: { name: '대한민국', approval: 9, stability: 40, power: 50, military: 50 },
+    storyArc: endlessArc,
+    currentOutcome: 'fail',
+    difficulty: 'real',
+  });
+  assert.equal(nationCollapse.type, 'bad');
+  assert.ok(nationCollapse.code.includes('GAME OVER'));
+
+  // 5. defaultStoryLength='endless' persists via /api/config and applies to newly created sessions
+  const server = createAppServer({ port: 0 });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const cfg = await (
+      await fetch(`${base}/api/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaultStoryLength: 'endless' }),
+      })
+    ).json();
+    assert.equal(cfg.defaultStoryLength, 'endless');
+
+    const created = await (
+      await fetch(`${base}/api/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ characterId: 'char_age_of_nations' }),
+      })
+    ).json();
+    assert.equal(created.session.storyLength, 'endless');
+    assert.equal(created.session.targetTurns, 0);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+

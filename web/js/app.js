@@ -76,8 +76,20 @@ const STORY_LENGTH_MAP = {
   short: { label: '단편', turns: 8 },
   standard: { label: '표준', turns: 14 },
   long: { label: '장편', turns: 24 },
-  endless: { label: '자유', turns: 0 },
+  endless: { label: '무제한', turns: 0 },
 };
+
+function countClientConsecutiveFails(session) {
+  const msgs = Array.isArray(session?.messages) ? session.messages : [];
+  let streak = 0;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (!m || m.role !== 'model' || m.isOpening) continue;
+    if (m.meta?.outcome === 'fail') streak++;
+    else break;
+  }
+  return streak;
+}
 
 function computeClientStoryArc(session) {
   if (!session) return { turn: 0, targetTurns: 14, remainingTurns: 14, progressPct: 0, actLabel: '제1막 · 발단', isEndless: false };
@@ -88,7 +100,7 @@ function computeClientStoryArc(session) {
     ? session.messages.filter((m) => m.role === 'user').length
     : Number(session.turnCount || 0);
   if (isEndless) {
-    return { storyLength: 'endless', turn, targetTurns: 0, remainingTurns: null, progressPct: 0, actLabel: '∞ 자유 연재', isEndless: true, isClimax: false };
+    return { storyLength: 'endless', turn, targetTurns: 0, remainingTurns: null, progressPct: 0, actLabel: '∞ 무제한 생존', isEndless: true, isClimax: false };
   }
   const ratio = targetTurns > 0 ? turn / targetTurns : 0;
   let actLabel = '제1막 · 발단';
@@ -372,18 +384,25 @@ function bindStaticEvents() {
     });
   });
 
-  // Story Length (단편 8턴 / 표준 14턴 / 장편 24턴 / 무한 자유)
+  // Story Length (단편 8턴 / 표준 14턴 / 장편 24턴 / ∞ 무제한 생존)
   $$('#storyLengthToggle .seg-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      applyStoryLengthMode(btn.dataset.slen);
+    });
+  });
+  $$('#settingsStoryLengthToggle .seg-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      if (!state.activeSession) return;
       const slen = btn.dataset.slen;
-      $$('#storyLengthToggle .seg-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      $$('#settingsStoryLengthToggle .seg-btn').forEach((b) => b.classList.toggle('active', b === btn));
       try {
-        const { session } = await api.updateSession(state.activeSession.id, { storyLength: slen });
-        state.activeSession = session;
-        updateChatHeaderHud();
+        const cfg = await api.updateConfig({ defaultStoryLength: slen });
+        if (cfg) state.config = cfg;
         const info = STORY_LENGTH_MAP[slen];
-        showToast(slen === 'endless' ? '∞ 자유 연재 모드로 전환되었습니다.' : `📖 ${info.label} (${info.turns}턴 완결) 구조로 설정되었습니다.`);
+        showToast(
+          slen === 'endless'
+            ? '∞ 기본 시작 모드가 [무제한 생존 (💀 게임오버 활성)]으로 설정되었습니다.'
+            : `📖 기본 시작 모드가 [${info.label} ${info.turns}턴 완결]로 설정되었습니다.`
+        );
       } catch (err) {
         showToast(humanizeError(err), 'error');
       }
@@ -413,8 +432,14 @@ function bindStaticEvents() {
     });
   });
 
-  // Clicking the top Story Arc Ribbon opens the Story Inspector directly
-  $('#storyArcBar')?.addEventListener('click', () => {
+  // Clicking the top Story Arc Ribbon opens the Story Inspector (except 1-tap quick mode pill)
+  $('#storyArcBar')?.addEventListener('click', (e) => {
+    const quickBtn = e.target.closest('[data-quick-slen]');
+    if (quickBtn) {
+      e.stopPropagation();
+      applyStoryLengthMode(quickBtn.dataset.quickSlen);
+      return;
+    }
     $('#inspectorDrawer')?.classList.add('open');
     const backdrop = $('#inspectorBackdrop');
     if (backdrop) backdrop.hidden = window.innerWidth > 860;
@@ -552,6 +577,11 @@ function bindStaticEvents() {
     btn.addEventListener('click', () => {
       const cmd = btn.dataset.ncmd || '';
       if (!cmd) return;
+      if (state.activeSession?.ending?.type === 'bad') {
+        showToast('💀 게임오버 상태입니다! [🔄 처음부터 재도전] 또는 [⏪ 직전 분기로 되돌리기]를 선택해 주세요.', 'error');
+        scrollToBottom();
+        return;
+      }
       if (state.isStreaming) {
         showToast('현재 AI 응답을 생성 중입니다. 잠시만 기다려 주세요.');
         return;
@@ -601,7 +631,14 @@ function bindStaticEvents() {
     $('#toggleSuggestionsBtn').classList.remove('active');
   });
   $('#refreshSuggestionsBtn').addEventListener('click', () => refreshSuggestions(true));
-  $('#continueBtn').addEventListener('click', () => triggerChatStream({ action: 'continue' }));
+  $('#continueBtn').addEventListener('click', () => {
+    if (state.activeSession?.ending?.type === 'bad') {
+      showToast('💀 게임오버 상태입니다! [🔄 처음부터 재도전] 또는 [⏪ 직전 분기로 되돌리기]를 선택해 주세요.', 'error');
+      scrollToBottom();
+      return;
+    }
+    triggerChatStream({ action: 'continue' });
+  });
   $('#regenerateLastBtn').addEventListener('click', () => triggerChatStream({ action: 'regenerate' }));
 
   $$('#lengthPills .len-pill').forEach((btn) => {
@@ -868,6 +905,8 @@ function openSettingsModal() {
 
   $('#cloudBackupBox').hidden = state.runtimeMode !== 'cloud';
   $$('#settingsThemeToggle .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.theme === state.theme));
+  const defSlen = cfg.defaultStoryLength || 'standard';
+  $$('#settingsStoryLengthToggle .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.slen === defSlen));
   $('#settingsModal').hidden = false;
 }
 
@@ -1127,7 +1166,7 @@ function renderContinuePlaying() {
           <div class="continue-preview">${escapeHtml(s.ending ? `🏆 ${s.ending.title}` : (s.lastPreview || s.mood || '이야기 이어하기'))}</div>
           <div class="continue-foot">
             <span>♥ ${s.affinity}</span>
-            <span>${s.targetTurns > 0 ? `📖 ${s.turnCount || 0}/${s.targetTurns}턴` : `💬 ${s.messageCount}턴`}</span>
+            <span>${s.storyLength === 'endless' || s.targetTurns === 0 ? `∞ ${s.turnCount || 0}턴` : `📖 ${s.turnCount || 0}/${s.targetTurns}턴`}</span>
             <button type="button" class="mini-reset-link" data-creset="${s.id}" title="처음부터 다시 시작">🔄 처음부터</button>
             <button type="button" class="mini-del-link" data-cdel="${s.id}" title="기록 삭제">✕</button>
           </div>
@@ -1523,10 +1562,12 @@ function openCharDetailModal(charId) {
       <div class="detail-actions">
         ${
           latestSession
-            ? `<button class="primary-btn" id="detailResumeBtn">💬 이전 이야기 이어하기 (${latestSession.messageCount}턴)</button>
+            ? `<button class="primary-btn" id="detailResumeBtn">💬 이전 이야기 이어하기 (${latestSession.storyLength === 'endless' || latestSession.targetTurns === 0 ? `∞ ${latestSession.turnCount || 0}턴` : `${latestSession.turnCount || 0}/${latestSession.targetTurns}턴`})</button>
                <button class="secondary-btn" id="detailResetBtn">🔄 처음부터 다시 시작</button>
-               <button class="ghost-btn" id="detailNewBtn">+ 새 회차 추가</button>`
-            : `<button class="primary-btn" id="detailNewBtn">✦ 지금 이야기 시작하기</button>`
+               <button class="ghost-btn" id="detailNewBtn">+ 새 회차 추가</button>
+               <button class="ghost-btn" id="detailStartEndlessBtn">∞ 무제한 새 회차</button>`
+            : `<button class="primary-btn" id="detailNewBtn">✦ 지금 이야기 시작하기</button>
+               <button class="secondary-btn" id="detailStartEndlessBtn">∞ 무제한 모드로 시작</button>`
         }
         <button class="ghost-btn" id="detailLikeBtn">${c.isLiked ? '❤️' : '🤍'} 좋아요 ${formatKoreanCount(c.likes)}</button>
         <button class="ghost-btn" id="detailEditBtn">✏️ 수정/복제</button>
@@ -1548,6 +1589,10 @@ function openCharDetailModal(charId) {
   $('#detailNewBtn').addEventListener('click', () => {
     closeModal('charDetailModal');
     startNewStory(c.id);
+  });
+  $('#detailStartEndlessBtn')?.addEventListener('click', () => {
+    closeModal('charDetailModal');
+    startNewStory(c.id, { storyLength: 'endless' });
   });
   $('#detailLikeBtn').addEventListener('click', async () => {
     try {
@@ -1668,7 +1713,7 @@ function renderChatsView() {
         <div class="session-card-preview">${escapeHtml(s.ending ? s.ending.summary : s.lastPreview)}</div>
         <div class="session-card-meta">
           <span>♥ ${s.affinity}</span>
-          <span>${s.targetTurns > 0 ? `📖 ${s.turnCount || 0}/${s.targetTurns}턴` : `💬 ${s.messageCount}턴`}</span>
+          <span>${s.storyLength === 'endless' || s.targetTurns === 0 ? `∞ ${s.turnCount || 0}턴` : `📖 ${s.turnCount || 0}/${s.targetTurns}턴`}</span>
           <span>${formatRelativeTime(s.updatedAt)}</span>
           <div class="session-card-actions">
             <button type="button" class="tiny-ghost-btn" data-card-reset="${s.id}" title="처음부터 다시 시작">🔄 처음부터</button>
@@ -1764,12 +1809,14 @@ async function openOrStartCharacter(characterId) {
   return startNewStory(characterId);
 }
 
-async function startNewStory(characterId) {
+async function startNewStory(characterId, { storyLength = null } = {}) {
   try {
-    const res = await api.createSession({
+    const payload = {
       characterId,
       personaId: state.config?.activePersonaId || state.personas[0]?.id,
-    });
+    };
+    if (storyLength) payload.storyLength = storyLength;
+    const res = await api.createSession(payload);
     await reloadSessions();
     await reloadCharacters();
     enterChatRoom(res.session, res.character, state.personas.find((p) => p.id === res.session.personaId) || state.personas[0]);
@@ -1839,8 +1886,10 @@ function enterChatRoom(session, character, persona) {
 function updateComposerEndingState(session) {
   const input = $('#chatInput');
   if (!input) return;
-  if (session?.ending) {
-    input.placeholder = '완결된 이야기입니다 · 엔딩 카드에서 [재도전]하거나 [자유 이어쓰기]를 선택하세요';
+  if (session?.ending?.type === 'bad') {
+    input.placeholder = '💀 GAME OVER · 위 엔딩 카드에서 [처음부터 재도전] 또는 [직전 분기로 되돌리기]를 선택하세요';
+  } else if (session?.ending) {
+    input.placeholder = '🏆 완결된 이야기 · 입력하거나 [무제한 이어쓰기]로 에필로그 이후를 계속 진행할 수 있어요';
   } else {
     input.placeholder = '대사를 입력하거나 *행동 지문*을 써보세요... (Enter 전송 · Shift+Enter 줄바꿈)';
   }
@@ -1938,6 +1987,29 @@ function updateChatHeaderHud(affinityDelta = 0) {
   updateComposerEndingState(s);
 }
 
+async function applyStoryLengthMode(slen) {
+  if (!state.activeSession || !STORY_LENGTH_MAP[slen]) return;
+  $$('#storyLengthToggle .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.slen === slen));
+  try {
+    const [{ session }, cfg] = await Promise.all([
+      api.updateSession(state.activeSession.id, { storyLength: slen }),
+      api.updateConfig({ defaultStoryLength: slen }).catch(() => null),
+    ]);
+    state.activeSession = session;
+    if (cfg) state.config = cfg;
+    updateChatHeaderHud();
+    reloadSessions();
+    const info = STORY_LENGTH_MAP[slen];
+    showToast(
+      slen === 'endless'
+        ? '∞ 무제한 생존 모드로 전환! (턴 제한 없음 · 💀 게임오버 상시 활성)'
+        : `📖 ${info.label} (${info.turns}턴 완결) 모드로 전환되었습니다.`
+    );
+  } catch (err) {
+    showToast(humanizeError(err), 'error');
+  }
+}
+
 function renderStoryArcBar(session) {
   const bar = $('#storyArcBar');
   if (!bar || !session) return;
@@ -1950,18 +2022,34 @@ function renderStoryArcBar(session) {
     const cls = e.type === 'bad' ? 'bad' : e.type === 'true' ? 'true' : e.type === 'bittersweet' ? 'bittersweet' : 'good';
     bar.className = `story-arc-bar ended ${cls}`;
     bar.innerHTML = `
-      <span class="arc-act-pill ${cls}">🏆 ${escapeHtml(e.code || 'ENDING')}</span>
+      <span class="arc-act-pill ${cls}">${cls === 'bad' ? '💀' : '🏆'} ${escapeHtml(e.code || 'ENDING')}</span>
       <span class="arc-ending-title">${escapeHtml(e.title)}</span>
-      <span class="arc-diff-pill">${arc.turn}턴 완결 · 클릭해 설정</span>
+      <span class="arc-diff-pill">${arc.turn}턴 ${cls === 'bad' ? '게임오버' : '완결'} · 클릭해 설정</span>
     `;
     return;
   }
 
-  bar.className = `story-arc-bar ${arc.isClimax ? 'climax' : ''}`;
+  const failLimit = diff === 'hardcore' ? 2 : diff === 'story' ? 4 : 3;
+  const failStreak = countClientConsecutiveFails(session);
+  const c = state.activeCharacter;
+  const ns = session.nationState;
+  const lowDanger = c?.isNationSim && ns
+    ? (Number(ns.approval ?? 55) <= 25 || Number(ns.stability ?? 65) <= 25 || Number(ns.power ?? 65) <= 20 || Number(ns.military ?? 65) <= 20)
+    : Number(session.affinity ?? 35) <= 15;
+  const isCritical = failStreak >= failLimit - 1 || lowDanger;
+
+  bar.className = `story-arc-bar ${arc.isClimax || isCritical ? 'climax' : ''}`;
   if (arc.isEndless) {
+    const survivalBadge = isCritical
+      ? `<span class="arc-danger-pill hot">🚨 게임오버 임박${failStreak > 0 ? ` (실패 ${failStreak}/${failLimit})` : ''}</span>`
+      : failStreak > 0
+        ? `<span class="arc-danger-pill">⚠️ 연속 실패 ${failStreak}/${failLimit}</span>`
+        : `<span class="arc-danger-pill safe">💀 게임오버 활성</span>`;
     bar.innerHTML = `
-      <span class="arc-act-pill">∞ 자유 연재</span>
-      <span class="arc-turn-text">${arc.turn}턴 진행 중 (치명적 실패 시 배드엔딩)</span>
+      <span class="arc-act-pill endless">∞ 무제한 생존</span>
+      <span class="arc-turn-text">${arc.turn}턴 진행 중</span>
+      ${survivalBadge}
+      <button type="button" class="arc-quick-mode-btn" data-quick-slen="standard" title="14턴 완결 모드로 전환">🎯 14턴 모드</button>
       <span class="arc-diff-pill">${diffLabel}</span>
     `;
     return;
@@ -1973,6 +2061,7 @@ function renderStoryArcBar(session) {
       <div class="arc-progress-fill ${arc.isClimax ? 'climax' : ''}" style="width:${arc.progressPct}%"></div>
     </div>
     <span class="arc-turn-text">${arc.turn} / ${arc.targetTurns}턴${arc.remainingTurns <= 2 ? ` · ${arc.remainingTurns === 0 ? '최종화!' : `완결 ${arc.remainingTurns}턴 전!`}` : ''}</span>
+    <button type="button" class="arc-quick-mode-btn endless-cta" data-quick-slen="endless" title="턴 제한 없이 무제한 생존 모드로 전환 (게임오버 유지)">∞ 무제한 전환</button>
     <span class="arc-diff-pill">${diffLabel}</span>
   `;
 }
@@ -2308,7 +2397,7 @@ function renderEndingCardHtml(session, character) {
       <div class="ending-actions-row">
         <button type="button" class="primary-btn" id="endingRetryBtn">🔄 처음부터 다른 선택으로 재도전</button>
         ${session.messages.length >= 3 ? '<button type="button" class="secondary-btn" id="endingRewindBtn">⏪ 직전 분기로 되돌리기</button>' : ''}
-        <button type="button" class="ghost-btn" id="endingContinueEndlessBtn">📖 엔딩 이후 자유 이어쓰기</button>
+        ${type !== 'bad' ? '<button type="button" class="ghost-btn" id="endingContinueEndlessBtn">∞ 엔딩 이후 무제한 이어쓰기</button>' : ''}
       </div>
     </section>
   `;
@@ -2421,12 +2510,17 @@ async function handleSendOrStop() {
   const text = input.value.trim();
   if (!text) return;
   if (state.activeSession?.ending) {
+    if (state.activeSession.ending.type === 'bad') {
+      showToast('💀 게임오버 상태입니다! [🔄 처음부터 재도전] 또는 [⏪ 직전 분기로 되돌리기]를 선택해 주세요.', 'error');
+      scrollToBottom();
+      return;
+    }
     try {
       const { session } = await api.updateSession(state.activeSession.id, { ending: null, storyLength: 'endless' });
       state.activeSession = session;
       updateChatHeaderHud();
       syncInspectorFields();
-      showToast('📖 엔딩 이후 자유 연재 모드로 이어서 진행합니다.');
+      showToast('∞ 엔딩 이후 무제한 생존 모드로 이어서 진행합니다.');
     } catch {
       // ignore
     }

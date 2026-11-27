@@ -25,6 +25,7 @@ const DEFAULT_CONFIG = {
   geminiApiKey: '',
   defaultModel: 'gemini-3.5-flash-lite',
   defaultMode: 'story',
+  defaultStoryLength: 'standard',
   theme: 'dark',
   viewMode: 'novel',
   fontFamily: 'sans',
@@ -120,13 +121,27 @@ const STORY_LENGTH_TURNS = {
   endless: 0,
 };
 
+function countConsecutiveFails(messages = [], currentOutcome = null) {
+  let streak = 0;
+  if (currentOutcome === 'fail') streak = 1;
+  else if (currentOutcome && currentOutcome !== 'fail') return 0;
+  const list = Array.isArray(messages) ? messages : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (!m || m.role !== 'model' || m.isOpening) continue;
+    if (m.meta?.outcome === 'fail') streak++;
+    else break;
+  }
+  return streak;
+}
+
 function computeStoryArc(session = {}) {
   const storyLength = session.storyLength || 'standard';
   const targetTurns = typeof session.targetTurns === 'number' ? session.targetTurns : (STORY_LENGTH_TURNS[storyLength] ?? 14);
   const isEndless = storyLength === 'endless' || targetTurns <= 0;
   const turn = Math.max(0, Array.isArray(session.messages) ? session.messages.filter((m) => m.role === 'user').length : Number(session.turnCount || 0));
   if (isEndless) {
-    return { storyLength: 'endless', turn, targetTurns: 0, remainingTurns: null, progressPct: 0, actIndex: 0, actLabel: '자유 연재 모드', isEndless: true, isClimax: false, isFinalTurn: false };
+    return { storyLength: 'endless', turn, targetTurns: 0, remainingTurns: null, progressPct: 0, actIndex: 0, actLabel: '∞ 무제한 생존', isEndless: true, isClimax: false, isFinalTurn: false };
   }
   const ratio = targetTurns > 0 ? turn / targetTurns : 0;
   let actIndex = 1;
@@ -164,6 +179,11 @@ function rollFateJudgment({ session = {}, character = {}, difficulty = null, sto
   } else if (Number(session.affinity ?? 35) <= 20) {
     roll = Math.max(1, roll - 10);
   }
+  if (countConsecutiveFails(session.messages || []) >= 1) roll = Math.max(1, roll - 5);
+  if (arc.isEndless) {
+    if (arc.turn >= 30) roll = Math.max(1, roll - 7);
+    else if (arc.turn >= 15) roll = Math.max(1, roll - 4);
+  }
   const th = diff === 'hardcore' ? { fail: 32, setback: 62, mixed: 86 } : diff === 'story' ? { fail: 10, setback: 28, mixed: 65 } : { fail: 24, setback: 50, mixed: 80 };
   if (roll <= th.fail) {
     return { roll, outcome: 'fail', label: '실패 · 역풍', directive: '[이번 턴 운명 판정: 명백한 실패 / 치명적 역풍] 절대 유저의 계획을 성공시켜 주지 마세요! 상대의 반격, 함정, 힘·자원의 한계, 내부 반발 또는 거절로 인해 이번 시도가 뚜렷하게 실패하고 뼈아픈 손실(부상, 신뢰·호감도 하락, 지지율·국고 급락, 주도권 상실)을 입게 하세요.' };
@@ -181,13 +201,13 @@ function normalizeEnding(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const typeRaw = String(raw.type || '').toLowerCase();
   const type = ['true', 'good', 'bittersweet', 'bad'].includes(typeRaw) ? typeRaw : 'good';
-  const labels = { true: 'TRUE ENDING · 진엔딩', good: 'GOOD ENDING · 굿엔딩', bittersweet: 'BITTERSWEET ENDING · 여운 엔딩', bad: 'BAD ENDING · 배드엔딩' };
+  const labels = { true: 'TRUE ENDING · 진엔딩', good: 'GOOD ENDING · 굿엔딩', bittersweet: 'BITTERSWEET ENDING · 여운 엔딩', bad: 'GAME OVER · 배드엔딩' };
   const title = String(raw.title || '').trim().slice(0, 60);
   if (!title) return null;
   return { type, code: String(raw.code || labels[type]).trim().slice(0, 42), title, summary: String(raw.summary || '').trim().slice(0, 260), reachedAt: new Date().toISOString() };
 }
 
-function resolveSessionEnding({ character = {}, nextAffinity = 35, nextNationState = null, storyArc = null, aiEnding = null, prevEnding = null } = {}) {
+function resolveSessionEnding({ character = {}, nextAffinity = 35, nextNationState = null, storyArc = null, aiEnding = null, prevEnding = null, recentMessages = [], currentOutcome = null, difficulty = 'real' } = {}) {
   if (prevEnding) return prevEnding;
   if (aiEnding && aiEnding.title) return aiEnding;
   const turn = storyArc?.turn || 0;
@@ -196,11 +216,22 @@ function resolveSessionEnding({ character = {}, nextAffinity = 35, nextNationSta
     const stab = Number(nextNationState.stability ?? 65);
     const pow = Number(nextNationState.power ?? 65);
     const mil = Number(nextNationState.military ?? 65);
-    if (app <= 10 || stab <= 10) return { type: 'bad', code: 'BAD ENDING · 정권 붕괴', title: '무너진 집무실과 탄핵의 밤', summary: `민심(${app}%)과 국내 안정도(${stab}%)가 임계점 이하로 추락하며 통치 기반이 완전히 붕괴했습니다.`, reachedAt: new Date().toISOString() };
-    if (pow <= 10 || mil <= 10) return { type: 'bad', code: 'BAD ENDING · 국가 패망', title: '꺼져버린 국운', summary: `국력(${pow})과 군사력(${mil})이 고갈되어 국가의 자주권과 존립을 지켜내지 못했습니다.`, reachedAt: new Date().toISOString() };
+    if (app <= 10 || stab <= 10) return { type: 'bad', code: 'GAME OVER · 정권 붕괴', title: '무너진 집무실과 탄핵의 밤', summary: `민심(${app}%)과 국내 안정도(${stab}%)가 임계점 이하로 추락하며 통치 기반이 완전히 붕괴했습니다.`, reachedAt: new Date().toISOString() };
+    if (pow <= 10 || mil <= 10) return { type: 'bad', code: 'GAME OVER · 국가 패망', title: '꺼져버린 국운', summary: `국력(${pow})과 군사력(${mil})이 고갈되어 국가의 자주권과 존립을 지켜내지 못했습니다.`, reachedAt: new Date().toISOString() };
   }
   if (!character.isNationSim && nextAffinity <= 5 && turn >= 3) {
-    return { type: 'bad', code: 'BAD ENDING · 파국', title: '돌이킬 수 없는 결별과 파멸', summary: `${character.name || '인물'}과의 신뢰가 완전히 무너지고, 치명적인 오판 끝에 이야기가 비극적으로 막을 내렸습니다.`, reachedAt: new Date().toISOString() };
+    return { type: 'bad', code: 'GAME OVER · 파국', title: '돌이킬 수 없는 결별과 파멸', summary: `${character.name || '인물'}과의 신뢰가 완전히 무너지고, 치명적인 오판 끝에 이야기가 비극적으로 막을 내렸습니다.`, reachedAt: new Date().toISOString() };
+  }
+  const failLimit = difficulty === 'hardcore' ? 2 : difficulty === 'story' ? 4 : 3;
+  const failStreak = countConsecutiveFails(recentMessages, currentOutcome);
+  if (currentOutcome === 'fail' && turn >= failLimit && failStreak >= failLimit) {
+    return {
+      type: 'bad',
+      code: 'GAME OVER · 연쇄 파국',
+      title: character.isNationSim ? '걷잡을 수 없는 국정 붕괴' : '돌이킬 수 없는 치명적 패배',
+      summary: `연속 ${failStreak}회의 치명적 실패와 역풍이 누적되면서, 결국 위기를 수습하지 못하고 게임오버에 이르렀습니다.`,
+      reachedAt: new Date().toISOString(),
+    };
   }
   if (storyArc && !storyArc.isEndless && storyArc.isFinalTurn) {
     if (character.isNationSim && nextNationState) {
@@ -431,8 +462,9 @@ function buildSystemInstruction({ character, session, persona, triggeredLorebook
   parts.push(`\n[현재 감정 상태]\n- 호감도: ${session.affinity ?? 35}/100 · 감정: ${session.mood || '호기심'} · 관계: ${session.relationshipStage || '첫 만남'}`);
   const arc = storyArc || computeStoryArc(session);
   const fate = fateRoll || rollFateJudgment({ session, character, storyArc: arc });
+  const failStreakNow = countConsecutiveFails(session.messages || []);
   const arcRule = arc.isEndless
-    ? `- 현재 진행: 자유 연재 모드 (${arc.turn}턴째). 단, 회복 불가능한 파국(사망·임무 완전 실패·국가 붕괴/탄핵·관계 영구 파탄)에 도달하면 즉시 배드엔딩으로 완결하세요.`
+    ? `- 현재 진행: ∞ 무제한 생존·연재 모드 (${arc.turn}턴째 · 턴 제한 없음 / 💀 게임오버 상시 활성!). 턴 수 때문에 억지로 끝내지 말고 대하서사처럼 길게 이어가되, 주인공 사망·치명적 패배·포획/처형·임무 파탄·국가 탄핵/붕괴·관계 영구 단절에 이르면 턴 수와 무관하게 즉시 "ending":{"type":"bad","code":"GAME OVER · 배드엔딩","title":"...","summary":"..."}을 출력해 게임오버로 종결하세요!${failStreakNow >= 1 ? ` (⚠️ 현재 연속 치명 실패 ${failStreakNow}회 누적 중 — 여기서 한 번 더 무모하거나 치명적 오판을 저지르면 즉각 파국!)` : ''}`
     : arc.isFinalTurn
       ? `- 🚨 [최종화 도달 · ${arc.turn}/${arc.targetTurns}턴 · 반드시 완결 엔딩 집필!] 이번 턴이 이 작품의 마지막 화입니다! 지금까지의 선택·성공과 실패를 총결산해 완결된 클라이맥스와 여운 깊은 에필로그를 집필하고, 반드시 마지막 줄 CRACK_STATE의 "ending" 필드에 결말을 기록하세요! (실패가 많았거나 치명적 오판을 했다면 가차 없이 bad/bittersweet 엔딩!)`
       : arc.isClimax
@@ -961,6 +993,7 @@ export const cloudBackend = {
       runtimeMode: cloudInfo.hasNetlifyFunction ? 'netlify-cloud' : 'static-cloud',
       defaultModel: cfg.defaultModel,
       defaultMode: cfg.defaultMode,
+      defaultStoryLength: ['short', 'standard', 'long', 'endless'].includes(cfg.defaultStoryLength) ? cfg.defaultStoryLength : 'standard',
       theme: cfg.theme === 'light' ? 'light' : 'dark',
       viewMode: cfg.viewMode,
       fontFamily: cfg.fontFamily,
@@ -1198,12 +1231,17 @@ export const cloudBackend = {
     return { sessions: list };
   },
 
-  async createSession({ characterId, personaId, title }) {
+  async createSession({ characterId, personaId, title, storyLength }) {
     const chars = await listCharactersCloud();
     const char = chars.find((c) => c.id === characterId);
     if (!char) throw new Error('캐릭터를 찾을 수 없습니다.');
     const personas = listPersonasLocal();
     const persona = personas.find((p) => p.id === personaId) || personas[0];
+    const cfg = readConfigRaw();
+    const resolvedLength = ['short', 'standard', 'long', 'endless'].includes(storyLength)
+      ? storyLength
+      : (['short', 'standard', 'long', 'endless'].includes(cfg.defaultStoryLength) ? cfg.defaultStoryLength : 'standard');
+    const resolvedTargetTurns = STORY_LENGTH_TURNS[resolvedLength] ?? 14;
     const now = new Date().toISOString();
     const opening = renderTemplate(char.openingMessage || `*${char.name}이(가) {{user}}를 바라보았다.*`, { userName: persona.name, charName: char.name });
 
@@ -1214,8 +1252,8 @@ export const cloudBackend = {
       personaId: persona.id,
       storyRoute: 'if',
       nationMode: 'realistic',
-      storyLength: 'standard',
-      targetTurns: 14,
+      storyLength: resolvedLength,
+      targetTurns: resolvedTargetTurns,
       difficulty: 'real',
       ending: null,
       nationState: char.initialNationState ? structuredClone(char.initialNationState) : null,
@@ -1453,6 +1491,9 @@ export const cloudBackend = {
         storyArc,
         aiEnding: result.stateUpdate?.ending || null,
         prevEnding: action === 'regenerate' ? null : session.ending,
+        recentMessages: action === 'regenerate' ? session.messages.slice(0, -1) : session.messages,
+        currentOutcome: resolvedOutcome,
+        difficulty: session.difficulty || 'real',
       });
 
       const meta = {

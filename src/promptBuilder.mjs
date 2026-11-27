@@ -60,6 +60,26 @@ export const STORY_LENGTH_TURNS = {
   endless: 0,
 };
 
+export function countConsecutiveFails(messages = [], currentOutcome = null) {
+  let streak = 0;
+  if (currentOutcome === 'fail') {
+    streak = 1;
+  } else if (currentOutcome && currentOutcome !== 'fail') {
+    return 0;
+  }
+  const list = Array.isArray(messages) ? messages : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (!m || m.role !== 'model' || m.isOpening) continue;
+    if (m.meta?.outcome === 'fail') {
+      streak++;
+    } else {
+      break;
+    }
+  }
+  return streak;
+}
+
 export function computeStoryArc(session = {}, { pendingTurnDelta = 0 } = {}) {
   const storyLength = session.storyLength || 'standard';
   const targetTurns =
@@ -81,7 +101,7 @@ export function computeStoryArc(session = {}, { pendingTurnDelta = 0 } = {}) {
       remainingTurns: null,
       progressPct: 0,
       actIndex: 0,
-      actLabel: '자유 연재 모드',
+      actLabel: '∞ 무제한 생존',
       isEndless: true,
       isClimax: false,
       isFinalTurn: false,
@@ -132,7 +152,7 @@ export function rollFateJudgment({ session = {}, character = {}, difficulty = nu
   }
 
   let roll = Math.floor(rng() * 100) + 1;
-  // Crisis spiral realism: low approval/stability or low affinity makes success harder
+  // Crisis spiral realism: low approval/stability, low affinity, consecutive failures, or deep endless turns increase risk
   if (character?.isNationSim && session.nationState) {
     const app = Number(session.nationState.approval ?? 58);
     const stab = Number(session.nationState.stability ?? 68);
@@ -140,6 +160,12 @@ export function rollFateJudgment({ session = {}, character = {}, difficulty = nu
     if (session.nationMode === 'crisis' || session.nationMode === 'surreal') roll = Math.max(1, roll - 8);
   } else if (Number(session.affinity ?? 35) <= 20) {
     roll = Math.max(1, roll - 10);
+  }
+  const prevFailStreak = countConsecutiveFails(session.messages || []);
+  if (prevFailStreak >= 1) roll = Math.max(1, roll - 5);
+  if (arc.isEndless) {
+    if (arc.turn >= 30) roll = Math.max(1, roll - 7);
+    else if (arc.turn >= 15) roll = Math.max(1, roll - 4);
   }
 
   const thresholds =
@@ -192,12 +218,15 @@ export function resolveSessionEnding({
   storyArc = null,
   aiEnding = null,
   prevEnding = null,
+  recentMessages = [],
+  currentOutcome = null,
+  difficulty = 'real',
 } = {}) {
   if (prevEnding) return prevEnding;
   if (aiEnding && aiEnding.title) return aiEnding;
 
   const turn = storyArc?.turn || 0;
-  // 1. Fatal collapse early Bad Ending (《국가의 시대》)
+  // 1. Fatal collapse early Bad Ending / GAME OVER (《국가의 시대》 — active in BOTH limited & endless modes!)
   if (character.isNationSim && nextNationState && turn >= 2) {
     const app = Number(nextNationState.approval ?? 55);
     const stab = Number(nextNationState.stability ?? 65);
@@ -206,7 +235,7 @@ export function resolveSessionEnding({
     if (app <= 10 || stab <= 10) {
       return {
         type: 'bad',
-        code: 'BAD ENDING · 정권 붕괴',
+        code: 'GAME OVER · 정권 붕괴',
         title: '무너진 집무실과 탄핵의 밤',
         summary: `민심(${app}%)과 국내 안정도(${stab}%)가 임계점 이하로 추락하며 통치 기반이 완전히 붕괴했습니다.`,
         reachedAt: new Date().toISOString(),
@@ -215,7 +244,7 @@ export function resolveSessionEnding({
     if (pow <= 10 || mil <= 10) {
       return {
         type: 'bad',
-        code: 'BAD ENDING · 국가 패망',
+        code: 'GAME OVER · 국가 패망',
         title: '꺼져버린 국운',
         summary: `국력(${pow})과 군사력(${mil})이 고갈되어 국가의 자주권과 존립을 지켜내지 못했습니다.`,
         reachedAt: new Date().toISOString(),
@@ -223,13 +252,26 @@ export function resolveSessionEnding({
     }
   }
 
-  // 2. Fatal collapse early Bad Ending (Character / Anime Worlds)
+  // 2. Fatal collapse early Bad Ending / GAME OVER (Character / Anime Worlds — active in BOTH limited & endless modes!)
   if (!character.isNationSim && nextAffinity <= 5 && turn >= 3) {
     return {
       type: 'bad',
-      code: 'BAD ENDING · 파국',
+      code: 'GAME OVER · 파국',
       title: '돌이킬 수 없는 결별과 파멸',
       summary: `${character.name || '인물'}과의 신뢰가 완전히 무너지고, 치명적인 오판 끝에 이야기가 비극적으로 막을 내렸습니다.`,
+      reachedAt: new Date().toISOString(),
+    };
+  }
+
+  // 2.5. Consecutive Fatal Failure Spiral -> Automatic GAME OVER (guarantees real Game Over stakes in Endless Mode!)
+  const failLimit = difficulty === 'hardcore' ? 2 : difficulty === 'story' ? 4 : 3;
+  const failStreak = countConsecutiveFails(recentMessages, currentOutcome);
+  if (currentOutcome === 'fail' && turn >= failLimit && failStreak >= failLimit) {
+    return {
+      type: 'bad',
+      code: 'GAME OVER · 연쇄 파국',
+      title: character.isNationSim ? '걷잡을 수 없는 국정 붕괴' : '돌이킬 수 없는 치명적 패배',
+      summary: `연속 ${failStreak}회의 치명적 실패와 역풍이 누적되면서, 결국 위기를 수습하지 못하고 게임오버에 이르렀습니다.`,
       reachedAt: new Date().toISOString(),
     };
   }
@@ -412,8 +454,12 @@ export function buildSystemInstruction({
   const arc = storyArc || computeStoryArc(session);
   const fate = fateRoll || rollFateJudgment({ session, character, storyArc: arc });
 
+  const failStreakNow = countConsecutiveFails(session.messages || []);
   const arcRule = arc.isEndless
-    ? `- 현재 진행: 자유 연재 모드 (${arc.turn}턴째). 단, 회복 불가능한 파국(주인공 사망·임무 완전 실패·국가 붕괴/탄핵·관계 영구 파탄)에 도달하면 즉시 배드엔딩으로 완결할 수 있습니다.`
+    ? `- 현재 진행: ∞ 무제한 생존·연재 모드 (${arc.turn}턴째 · 턴 제한 없음 / 💀 게임오버 상시 활성!).
+  턴 수가 찼다고 억지로 이야기를 끝내지 말고 장편 대하서사처럼 깊고 길게 이어가세요.
+  단, 무제한 모드라고 해서 주인공이 불사신이거나 무조건 살아남아서는 절대 안 됩니다!
+  주인공 사망·치명상 전투 패배·포획 및 처형·임무의 회복 불가능한 파탄·국가 탄핵/쿠데타/패망·관계 영구 단절에 이르면 턴 수와 무관하게 **즉시 "ending":{"type":"bad","code":"GAME OVER · 배드엔딩","title":"...","summary":"..."}을 출력해 게임오버로 종결**하세요!${failStreakNow >= 1 ? `\n  ⚠️ 현재 연속 치명 실패 ${failStreakNow}회 누적 중! 여기서 한 번 더 무모하거나 치명적인 오판을 저지르면 즉각 파국(게임오버)으로 몰아가세요.` : ''}`
     : arc.isFinalTurn
       ? `- 🚨 [최종화 도달 · ${arc.turn}/${arc.targetTurns}턴 · 반드시 완결 엔딩 집필!]
   이번 턴이 이 작품의 마지막 화입니다! 지금까지의 모든 선택, 성공과 실패, 인물의 감정과 세계관의 변화를 총결산하여 **완결된 클라이맥스와 여운 깊은 에필로그**를 집필하세요.
